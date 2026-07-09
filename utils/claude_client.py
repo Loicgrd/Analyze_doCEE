@@ -80,7 +80,7 @@ def build_prompt(
     docs_text = _build_docs_section(docs)
 
     context_info = f"""# CONTEXTE PRÉ-ANALYSÉ (à vérifier et corriger si besoin)
-- Fiche probable : {classification.get('fiche', 'INCONNUE')}
+- Fiche(s) probable(s) : {', '.join(classification.get('fiches', [classification.get('fiche', 'INCONNUE')]))}
 - Secteur : {classification.get('secteur', 'BAR')}
 - Type d'engagement : {classification.get('type_engagement', 'inconnu')}
 - Coup de pouce : {'Oui' if classification.get('coup_de_pouce') else 'Non'}
