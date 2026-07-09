@@ -1,6 +1,11 @@
 """
 Application Streamlit — Analyseur de dossiers CEE
 Dépose un ZIP, obtiens l'analyse de conformité en quelques secondes.
+
+Sécurité : la clé API est lue en priorité depuis st.secrets (Streamlit Cloud),
+avec repli sur la variable d'environnement, puis sur une saisie manuelle
+(déconseillée en partage — visible seulement par la session de l'utilisateur,
+mais à éviter si l'app est publique).
 """
 
 import os
@@ -11,7 +16,6 @@ from pathlib import Path
 
 import streamlit as st
 
-# ── Configuration de la page ──────────────────────────────────────────────────
 st.set_page_config(
     page_title="Analyseur CEE",
     page_icon="⚡",
@@ -19,7 +23,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── CSS minimal ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 .statut-valide    { background:#d1fae5; color:#065f46; padding:10px 16px;
@@ -35,41 +38,60 @@ st.markdown("""
              margin:2px; }
 .cost-box  { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;
              padding:12px 16px; font-size:0.85rem; color:#64748b; }
+.dryrun-box { background:#f5f3ff; border:1px solid #ddd6fe; border-radius:8px;
+              padding:12px 16px; font-size:0.85rem; color:#5b21b6; }
 </style>
 """, unsafe_allow_html=True)
 
 
+def get_api_key() -> str:
+    """
+    Récupère la clé API par ordre de priorité :
+    1. st.secrets (Streamlit Cloud — recommandé en production)
+    2. Variable d'environnement (usage local/serveur interne)
+    3. Saisie manuelle (tests ponctuels uniquement)
+    """
+    try:
+        if "ANTHROPIC_API_KEY" in st.secrets:
+            return st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        pass
+    return os.environ.get("ANTHROPIC_API_KEY", "")
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/3/3b/Eo_circle_yellow_white_letter-e.svg/240px-Eo_circle_yellow_white_letter-e.svg.png", width=48)
-    st.title("Analyseur CEE")
+    st.title("⚡ Analyseur CEE")
     st.caption("Vérification automatique de conformité des dossiers CEE")
 
     st.divider()
     st.subheader("⚙️ Configuration")
 
-    # Clé API — priorité : variable d'env > saisie manuelle
-    api_key_env = os.environ.get("ANTHROPIC_API_KEY", "")
-    if api_key_env:
-        st.success("Clé API détectée (variable d'env)", icon="✅")
-        api_key = api_key_env
+    api_key_found = get_api_key()
+    api_key_source = None
+    if api_key_found:
+        try:
+            if "ANTHROPIC_API_KEY" in st.secrets:
+                api_key_source = "secrets"
+        except Exception:
+            api_key_source = "env"
+        st.success(
+            f"Clé API détectée ({'st.secrets' if api_key_source == 'secrets' else 'variable environnement'})",
+            icon="✅",
+        )
+        api_key = api_key_found
     else:
+        st.warning("Aucune clé API configurée", icon="⚠️")
         api_key = st.text_input(
-            "Clé API Anthropic",
+            "Clé API Anthropic (test ponctuel uniquement)",
             type="password",
             placeholder="sk-ant-...",
-            help="Disponible sur console.anthropic.com",
+            help="⚠️ Déconseillé si l'app est partagée — préférer st.secrets côté Streamlit Cloud.",
         )
 
     st.divider()
 
-    # Chemin vers les règles
-    rules_dir = st.text_input(
-        "Dossier des règles (grimoires)",
-        value="./rules_data",
-        help="Chemin vers le dossier contenant les CSV et PDFs de règles",
-    )
-
+    rules_dir = st.text_input("Dossier des règles", value="./rules_data")
     rules_path = Path(rules_dir)
     if rules_path.exists():
         n_files = len(list(rules_path.iterdir()))
@@ -78,54 +100,79 @@ with st.sidebar:
         st.warning("Dossier introuvable — vérifier le chemin")
 
     st.divider()
-    st.caption("v1.0 · Claude Sonnet 4.6 + Haiku 4.5")
-    st.caption("~0,06 € par analyse")
+
+    dry_run_mode = st.toggle(
+        "🧪 Mode test (dry-run)",
+        value=False,
+        help="Assemble le prompt complet SANS appeler l'API — gratuit. "
+             "Permet de vérifier l'extraction, la classification et le "
+             "chargement des règles avant de payer un vrai appel.",
+    )
+    if dry_run_mode:
+        st.caption("Aucun appel API ne sera facturé dans ce mode.")
+
+    st.divider()
+    st.caption("v1.1 · Claude Sonnet 4.6 + Haiku 4.5")
+    st.caption("~0,06 € par analyse réelle · 0 € en mode test")
 
 
 # ── Corps principal ───────────────────────────────────────────────────────────
 st.title("⚡ Analyse de dossier CEE")
 st.caption("Déposez le ZIP du dossier ODICEE pour vérifier sa conformité réglementaire.")
 
-uploaded = st.file_uploader(
-    "Dossier CEE (ZIP)",
-    type=["zip"],
-    help="Le ZIP doit contenir les PDFs : engagement, réalisation, RGE, et optionnellement l'AH",
-)
+col_up, col_fiche = st.columns([2, 1])
+with col_up:
+    uploaded = st.file_uploader("Dossier CEE (ZIP)", type=["zip"])
+with col_fiche:
+    fiche_mode = st.radio(
+        "Détection de la fiche",
+        ["Automatique (IA)", "Manuelle"],
+        help="En automatique, une IA identifie la fiche à partir de la nature des "
+             "travaux décrits (matériaux, équipements) si aucun code n'est écrit "
+             "explicitement. En manuel, vous imposez directement le code — utile "
+             "si vous connaissez déjà le dossier ou si la détection automatique "
+             "hésite.",
+    )
+    fiche_manuelle = None
+    if fiche_mode == "Manuelle":
+        fiche_manuelle = st.text_input(
+            "Code fiche",
+            placeholder="ex: BAR-EN-105",
+            help="Code exact tel qu'il apparaît dans vos CSV Fiche Récapitulatif",
+        ).strip().upper() or None
 
 if uploaded:
     st.divider()
-
     col_info, col_btn = st.columns([3, 1])
     with col_info:
         st.markdown(f"**Fichier :** `{uploaded.name}` · {uploaded.size / 1024:.0f} Ko")
     with col_btn:
-        run = st.button("🔍 Lancer l'analyse", type="primary", use_container_width=True)
+        label = "🧪 Tester (gratuit)" if dry_run_mode else "🔍 Lancer l'analyse"
+        run = st.button(label, type="primary", use_container_width=True)
 
     if run:
-        # Vérifications préalables
-        if not api_key:
-            st.error("Clé API Anthropic manquante — renseignez-la dans la barre latérale.")
+        if not dry_run_mode and not api_key:
+            st.error("Clé API Anthropic manquante — renseignez-la dans la barre latérale, "
+                      "ou activez le mode test pour vérifier le pipeline sans clé.")
             st.stop()
         if not rules_path.exists():
             st.error(f"Dossier de règles introuvable : `{rules_dir}`")
             st.stop()
 
-        os.environ["ANTHROPIC_API_KEY"] = api_key
+        if api_key:
+            os.environ["ANTHROPIC_API_KEY"] = api_key
 
-        # Import ici pour bénéficier de la clé positionnée
-        from utils.extractor import extract_zip, extract_text_from_pdf, is_scanned_pdf, ocr_pdf_page
-        from utils.classifier import classify_dossier
+        from utils.extractor import extract_zip, extract_text_from_pdf, is_scanned_pdf, ocr_pdf_smart, get_page_count
+        from utils.classifier import classify_dossier, classify_dossier_regex
         from utils.rule_loader import RuleLoader
-        from utils.claude_client import analyze_with_claude
+        from utils.claude_client import analyze_with_claude, dry_run as run_dry_run
 
         t0 = time.time()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Sauvegarder le ZIP uploadé
             zip_path = Path(tmpdir) / uploaded.name
             zip_path.write_bytes(uploaded.getvalue())
 
-            # ── Étape 1 : Extraction ───────────────────────────────────────
             with st.status("📂 Extraction des PDFs…", expanded=True) as status:
                 pdf_files = extract_zip(zip_path, tmpdir)
                 if not pdf_files:
@@ -133,7 +180,6 @@ if uploaded:
                     st.stop()
                 st.write(f"→ {len(pdf_files)} PDF(s) trouvé(s)")
 
-                # ── Étape 2 : Lecture des textes ──────────────────────────
                 status.update(label="📄 Lecture des documents…")
                 docs = {}
                 for pdf_path in pdf_files:
@@ -141,164 +187,243 @@ if uploaded:
                     name = pdf_path.stem.lower()
                     scanned = is_scanned_pdf(pdf_path)
                     if scanned:
-                        text = ocr_pdf_page(pdf_path, page=1)
-                        st.write(f"→ `{pdf_path.name}` — scanné (OCR)")
+                        n_pages = get_page_count(pdf_path)
+                        text = ocr_pdf_smart(pdf_path)
+                        st.write(f"→ `{pdf_path.name}` — scanné, {n_pages} page(s), OCR intelligent (début + fin)")
                     else:
                         text = extract_text_from_pdf(pdf_path)
                         st.write(f"→ `{pdf_path.name}` — texte extrait")
                     docs[name] = {"text": text, "scanned": scanned, "path": str(pdf_path)}
 
-                # ── Étape 3 : Classification ──────────────────────────────
-                status.update(label="🔎 Classification du dossier…")
-                classification = classify_dossier(docs)
-                st.write(f"→ Fiche détectée : **{classification['fiche']}** "
-                         f"(confiance : {classification.get('confiance', '?')})")
-
-                # ── Étape 4 : Chargement règles ───────────────────────────
-                status.update(label="📚 Chargement des règles…")
+                status.update(label="📚 Chargement de la nomenclature…")
                 loader = RuleLoader(rules_path)
-                rules_bundle = loader.load_for_classification(classification)
-                n_rules = len(rules_bundle)
-                tokens_rules = sum(len(v) for v in rules_bundle.values()) // 4
-                st.write(f"→ {n_rules} fichier(s) de règles chargés (~{tokens_rules:,} tokens)")
+                correspondance_table = loader.get_fiche_correspondance_table()
 
-                # ── Étape 5 : Analyse Claude ──────────────────────────────
-                status.update(label="🤖 Analyse par Claude Sonnet 4.6…")
-                result = analyze_with_claude(
-                    docs=docs,
-                    rules_bundle=rules_bundle,
-                    classification=classification,
-                )
-                status.update(label="✅ Analyse terminée", state="complete", expanded=False)
+                status.update(label="🔎 Classification du dossier…")
+                if fiche_manuelle:
+                    # Contournement total : on ne fait tourner le classifier que pour
+                    # récupérer secteur/type d'engagement, la fiche est imposée.
+                    if dry_run_mode and not api_key:
+                        classification = classify_dossier_regex(docs)
+                    else:
+                        classification = classify_dossier(docs, correspondance_table=correspondance_table)
+                    classification["fiche"] = fiche_manuelle
+                    classification["secteur"] = "BAT" if fiche_manuelle.startswith("BAT") else "BAR"
+                    classification["confiance"] = "haute"
+                    classification["raisonnement"] = "Fiche indiquée manuellement par l'utilisateur"
+                    st.write(f"→ Fiche imposée manuellement : **{fiche_manuelle}**")
+                elif dry_run_mode and not api_key:
+                    classification = classify_dossier_regex(docs)
+                    st.write(f"→ Fiche détectée (regex, sans IA) : **{classification['fiche']}** "
+                             f"(confiance : {classification.get('confiance', '?')})")
+                else:
+                    classification = classify_dossier(docs, correspondance_table=correspondance_table)
+                    st.write(f"→ Fiche détectée : **{classification['fiche']}** "
+                             f"(confiance : {classification.get('confiance', '?')})")
+                    if classification.get("raisonnement"):
+                        st.caption(f"_{classification['raisonnement']}_")
+
+                if classification['fiche'] == "INCONNUE":
+                    st.warning(
+                        "⚠️ Aucune fiche BAR/BAT identifiée. Vérifiez si le VISA ou un "
+                        "document listant la fiche est bien inclus dans le ZIP, ou "
+                        "utilisez le mode **Manuelle** ci-dessus pour l'indiquer vous-même.",
+                        icon="⚠️",
+                    )
+
+                status.update(label="📚 Chargement des règles…")
+                core_rules = loader.get_core_rules_text()
+                variable_rules = loader.get_variable_rules_text(classification)
+                st.write(f"→ Socle : ~{len(core_rules)//4:,} tk (caché) · "
+                         f"Variable : ~{len(variable_rules)//4:,} tk")
+
+                if dry_run_mode:
+                    status.update(label="🧪 Assemblage du prompt (mode test)…")
+                    result = run_dry_run(docs, core_rules, variable_rules, classification)
+                    status.update(label="✅ Prompt assemblé (aucun appel API)", state="complete", expanded=False)
+                else:
+                    status.update(label="🤖 Analyse par Claude Sonnet 4.6…")
+                    result = analyze_with_claude(
+                        docs=docs,
+                        core_rules_text=core_rules,
+                        variable_rules_text=variable_rules,
+                        classification=classification,
+                    )
+                    status.update(label="✅ Analyse terminée", state="complete", expanded=False)
 
         elapsed = time.time() - t0
 
-        # ── Affichage des résultats ────────────────────────────────────────
         st.divider()
 
-        # En-tête résumé
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            statut = result.get("statut", "INDÉTERMINÉ")
-            css_class = {
-                "VALIDE":       "statut-valide",
-                "NON VALIDE":   "statut-invalide",
-                "INCOMPLET":    "statut-incomplet",
-            }.get(statut, "statut-inconnu")
-            icons = {"VALIDE": "✅", "NON VALIDE": "❌", "INCOMPLET": "⚠️"}
-            icon = icons.get(statut, "❓")
+        # ══════════════════════════════════════════════════════════════
+        # AFFICHAGE MODE DRY-RUN
+        # ══════════════════════════════════════════════════════════════
+        if dry_run_mode:
             st.markdown(
-                f'<div class="{css_class}">{icon} {statut}</div>',
+                '<div class="dryrun-box">🧪 <b>Mode test</b> — aucun appel API n\'a été '
+                'effectué, aucun coût engagé.</div>',
                 unsafe_allow_html=True,
             )
+            st.divider()
 
-        with col2:
-            fiche = classification.get("fiche", "?")
-            confiance = classification.get("confiance", "?")
-            raisonnement = classification.get("raisonnement", "")
-            st.markdown(
-                f'<span class="info-pill">📋 {fiche}</span>'
-                f'<span class="info-pill">🎯 Confiance : {confiance}</span>',
-                unsafe_allow_html=True,
-            )
-            if raisonnement:
-                st.caption(f"_{raisonnement}_")
+            tk = result["tokens_estimation"]
+            cout = result["cout_estime_eur"]
 
-        with col3:
-            tokens = result.get("tokens_used", {})
-            total_tok = tokens.get("total", 0)
-            cost_eur = (
-                tokens.get("input", 0) * 3 / 1_000_000
-                + tokens.get("output", 0) * 15 / 1_000_000
-            ) * 0.92  # conversion USD → EUR approximative
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Tokens socle (cacheable)", f"{tk['core_socle']:,}")
+            with col2:
+                st.metric("Tokens variables", f"{tk['variable']:,}")
+            with col3:
+                st.metric("Total input estimé", f"{tk['total_input']:,}")
+
             st.markdown(
-                f'<div class="cost-box">'
-                f'🪙 <b>{total_tok:,}</b> tokens utilisés<br>'
-                f'💶 <b>~{cost_eur:.4f} €</b> · ⏱ {elapsed:.1f}s'
+                f'<div class="cost-box">💶 Coût estimé si réel : '
+                f'<b>~{cout["premier_appel"]:.4f} €</b> (1er appel) · '
+                f'<b>~{cout["appels_suivants_avec_cache"]:.4f} €</b> (appels suivants, avec cache)'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
-        # Contexte détecté
-        ctx_pills = []
-        if classification.get("coup_de_pouce"):
-            ctx_pills.append("🎁 Coup de pouce")
-        if classification.get("sous_traitance"):
-            ctx_pills.append("🔧 Sous-traitance")
-        secteur = classification.get("secteur", "BAR")
-        ctx_pills.append(f"🏠 {'Résidentiel (BAR)' if secteur == 'BAR' else 'Tertiaire (BAT)'}")
-        type_eng = classification.get("type_engagement", "inconnu").replace("_", " ").title()
-        ctx_pills.append(f"📝 {type_eng}")
+            st.divider()
+            st.subheader("📋 Prompt qui serait envoyé à Claude")
 
-        st.markdown(
-            " ".join(f'<span class="info-pill">{p}</span>' for p in ctx_pills),
-            unsafe_allow_html=True,
-        )
+            with st.expander("**Instructions système**", expanded=False):
+                st.text(result["prompt_system"])
+            with st.expander(f"**Socle de règles** (~{tk['core_socle']:,} tk, caché)", expanded=True):
+                st.text(result["prompt_core"])
+            with st.expander(f"**Bloc variable** (fiche + documents, ~{tk['variable']:,} tk)", expanded=True):
+                st.text(result["prompt_variable"])
 
-        st.divider()
+            st.info(
+                "Vérifiez ici que les bons documents sont extraits, que la fiche détectée "
+                "est cohérente, et que les règles chargées sont pertinentes — avant de "
+                "désactiver le mode test pour lancer une vraie analyse.",
+                icon="ℹ️",
+            )
 
-        # Analyse complète
-        st.subheader("📋 Analyse détaillée")
-        analyse = result.get("analyse", "")
-
-        # Affichage section par section si les titres ## sont présents
-        if "##" in analyse:
-            sections = analyse.split("\n## ")
-            st.markdown(sections[0])  # intro éventuelle
-            for section in sections[1:]:
-                lines = section.split("\n", 1)
-                title = lines[0].strip()
-                body = lines[1].strip() if len(lines) > 1 else ""
-                with st.expander(f"**{title}**", expanded=True):
-                    st.markdown(body)
+        # ══════════════════════════════════════════════════════════════
+        # AFFICHAGE MODE RÉEL
+        # ══════════════════════════════════════════════════════════════
         else:
-            st.markdown(analyse)
+            col1, col2, col3 = st.columns(3)
 
-        # Export JSON
-        st.divider()
-        export_data = {
-            "fichier": uploaded.name,
-            "classification": classification,
-            "statut": statut,
-            "tokens_used": tokens,
-            "cout_eur": round(cost_eur, 4),
-            "temps_secondes": round(elapsed, 1),
-            "analyse": analyse,
-        }
-        st.download_button(
-            label="⬇️ Télécharger le résultat (JSON)",
-            data=json.dumps(export_data, ensure_ascii=False, indent=2),
-            file_name=f"analyse_{uploaded.name.replace('.zip', '')}.json",
-            mime="application/json",
-        )
+            with col1:
+                statut = result.get("statut", "INDÉTERMINÉ")
+                css_class = {
+                    "VALIDE": "statut-valide",
+                    "NON VALIDE": "statut-invalide",
+                    "INCOMPLET": "statut-incomplet",
+                }.get(statut, "statut-inconnu")
+                icons = {"VALIDE": "✅", "NON VALIDE": "❌", "INCOMPLET": "⚠️"}
+                icon = icons.get(statut, "❓")
+                st.markdown(f'<div class="{css_class}">{icon} {statut}</div>', unsafe_allow_html=True)
+
+            with col2:
+                fiche = classification.get("fiche", "?")
+                confiance = classification.get("confiance", "?")
+                st.markdown(
+                    f'<span class="info-pill">📋 {fiche}</span>'
+                    f'<span class="info-pill">🎯 Confiance : {confiance}</span>',
+                    unsafe_allow_html=True,
+                )
+                raisonnement = classification.get("raisonnement", "")
+                if raisonnement:
+                    st.caption(f"_{raisonnement}_")
+
+            with col3:
+                tokens = result.get("tokens_used", {})
+                total_tok = tokens.get("total", 0)
+                cost_eur = (
+                    tokens.get("input", 0) * 3 / 1_000_000
+                    + tokens.get("output", 0) * 15 / 1_000_000
+                ) * 0.92
+                st.markdown(
+                    f'<div class="cost-box">🪙 <b>{total_tok:,}</b> tokens utilisés<br>'
+                    f'💶 <b>~{cost_eur:.4f} €</b> · ⏱ {elapsed:.1f}s</div>',
+                    unsafe_allow_html=True,
+                )
+
+            ctx_pills = []
+            if classification.get("coup_de_pouce"):
+                ctx_pills.append("🎁 Coup de pouce")
+            if classification.get("sous_traitance"):
+                ctx_pills.append("🔧 Sous-traitance")
+            secteur = classification.get("secteur", "BAR")
+            ctx_pills.append(f"🏠 {'Résidentiel (BAR)' if secteur == 'BAR' else 'Tertiaire (BAT)'}")
+            type_eng = classification.get("type_engagement", "inconnu").replace("_", " ").title()
+            ctx_pills.append(f"📝 {type_eng}")
+            st.markdown(" ".join(f'<span class="info-pill">{p}</span>' for p in ctx_pills), unsafe_allow_html=True)
+
+            st.divider()
+            st.subheader("📋 Analyse détaillée")
+            analyse = result.get("analyse", "")
+
+            if "##" in analyse:
+                sections = analyse.split("\n## ")
+                st.markdown(sections[0])
+                for section in sections[1:]:
+                    lines = section.split("\n", 1)
+                    title = lines[0].strip()
+                    body = lines[1].strip() if len(lines) > 1 else ""
+                    with st.expander(f"**{title}**", expanded=True):
+                        st.markdown(body)
+            else:
+                st.markdown(analyse)
+
+            st.divider()
+            export_data = {
+                "fichier": uploaded.name,
+                "classification": classification,
+                "statut": statut,
+                "tokens_used": tokens,
+                "cout_eur": round(cost_eur, 4),
+                "temps_secondes": round(elapsed, 1),
+                "analyse": analyse,
+            }
+            st.download_button(
+                label="⬇️ Télécharger le résultat (JSON)",
+                data=json.dumps(export_data, ensure_ascii=False, indent=2),
+                file_name=f"analyse_{uploaded.name.replace('.zip', '')}.json",
+                mime="application/json",
+            )
 
 else:
-    # État initial — instructions
     st.info(
         "👆 Déposez le ZIP du dossier ODICEE ci-dessus pour démarrer l'analyse.\n\n"
-        "Le ZIP doit contenir les PDFs habituels : engagement (OS, bon de commande…), "
-        "preuve de réalisation (facture, DGD…), certificat RGE, et idéalement l'attestation sur l'honneur.",
+        "💡 Activez le **mode test** dans la barre latérale pour vérifier gratuitement "
+        "l'extraction et la classification avant de lancer une vraie analyse payante.",
         icon="ℹ️",
     )
 
     with st.expander("Comment configurer l'application ?"):
         st.markdown("""
-**1. Clé API Anthropic**
-Renseignez-la dans la barre latérale, ou définissez la variable d'environnement :
+**1. Clé API Anthropic — configuration recommandée**
+
+Sur Streamlit Community Cloud, allez dans les paramètres de l'app → onglet **Secrets** et ajoutez :
+```toml
+ANTHROPIC_API_KEY = "sk-ant-..."
+```
+La clé n'apparaît alors jamais dans le code ni dans le repo Git.
+
+En local, utilisez plutôt la variable d'environnement :
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 **2. Dossier des règles**
-Copiez vos grimoires et CSV dans `./rules_data/` avec le script fourni :
 ```bash
 python setup_rules.py --source /chemin/vers/grimoires --dest ./rules_data
 ```
 
-**3. Lancer l'app**
+**3. Tester sans payer**
+Activez le mode test (dry-run) dans la barre latérale — le pipeline complet
+(extraction, OCR, classification, chargement des règles) s'exécute normalement,
+seul l'appel final à Claude est remplacé par un aperçu du prompt qui serait envoyé.
+
+**4. Lancer l'app**
 ```bash
-pip install streamlit anthropic
+pip install -r requirements.txt
 streamlit run app.py
 ```
         """)

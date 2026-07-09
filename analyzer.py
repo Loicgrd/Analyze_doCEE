@@ -1,40 +1,24 @@
 """
-CEE Dossier Analyzer
-====================
-Analyse un dossier CEE (ZIP ou dossier de PDFs) en utilisant
-un chargement sélectif des règles pour minimiser les tokens.
+CEE Dossier Analyzer — CLI
 """
 
 import os
 import sys
 import json
-import zipfile
 import tempfile
 import argparse
 from pathlib import Path
 
-from utils.extractor import extract_zip, extract_text_from_pdf, is_scanned_pdf, ocr_pdf_page
+from utils.extractor import extract_zip, extract_text_from_pdf, is_scanned_pdf, ocr_pdf_smart
 from utils.classifier import classify_dossier
 from utils.rule_loader import RuleLoader
-from utils.claude_client import analyze_with_claude
+from utils.claude_client import analyze_with_claude, dry_run as run_dry_run
 
 
-def process_dossier(input_path: str, rules_dir: str, verbose: bool = False) -> dict:
-    """
-    Pipeline complet d'analyse d'un dossier CEE.
-
-    Args:
-        input_path: Chemin vers le ZIP ou dossier contenant les PDFs
-        rules_dir: Chemin vers le dossier contenant les règles (grimoires, CSV)
-        verbose: Afficher les détails de traitement
-
-    Returns:
-        dict avec les clés: fiche, statut, details, tokens_used
-    """
+def process_dossier(input_path: str, rules_dir: str, verbose: bool = False, dry_run: bool = False, fiche_override: str = None) -> dict:
     input_path = Path(input_path)
     rules_dir = Path(rules_dir)
 
-    # --- 1. Extraction des fichiers ---
     if verbose:
         print(f"[1/4] Extraction de : {input_path.name}")
 
@@ -49,7 +33,6 @@ def process_dossier(input_path: str, rules_dir: str, verbose: bool = False) -> d
         if not pdf_files:
             raise ValueError("Aucun PDF trouvé dans le dossier/ZIP fourni.")
 
-        # --- 2. Extraction du texte de chaque PDF ---
         if verbose:
             print(f"[2/4] Lecture de {len(pdf_files)} PDF(s)...")
 
@@ -59,8 +42,7 @@ def process_dossier(input_path: str, rules_dir: str, verbose: bool = False) -> d
             name = pdf_path.stem.lower()
 
             if is_scanned_pdf(pdf_path):
-                # OCR sur la première page pour les docs scannés
-                text = ocr_pdf_page(pdf_path, page=1)
+                text = ocr_pdf_smart(pdf_path)
                 docs[name] = {"text": text, "scanned": True, "path": str(pdf_path)}
             else:
                 text = extract_text_from_pdf(pdf_path)
@@ -71,62 +53,66 @@ def process_dossier(input_path: str, rules_dir: str, verbose: bool = False) -> d
                 scanned_tag = " [SCANNÉ]" if docs[name]["scanned"] else ""
                 print(f"   • {pdf_path.name}{scanned_tag}: {preview}...")
 
-        # --- 3. Classification et chargement sélectif des règles ---
         if verbose:
             print("[3/4] Classification du dossier...")
 
-        classification = classify_dossier(docs)
-
-        if verbose:
-            print(f"   → Fiche détectée : {classification['fiche']}")
-            print(f"   → Type secteur   : {classification['secteur']}")
-            print(f"   → Coup de pouce  : {classification['coup_de_pouce']}")
-
         loader = RuleLoader(rules_dir)
+        correspondance_table = loader.get_fiche_correspondance_table()
+
+        if fiche_override:
+            classification = classify_dossier(docs, correspondance_table=correspondance_table)
+            classification["fiche"] = fiche_override
+            classification["secteur"] = "BAT" if fiche_override.upper().startswith("BAT") else "BAR"
+            classification["confiance"] = "haute"
+            classification["raisonnement"] = "Fiche indiquée manuellement par l'utilisateur"
+            if verbose:
+                print(f"   → Fiche imposée manuellement : {fiche_override}")
+        else:
+            classification = classify_dossier(docs, correspondance_table=correspondance_table)
+            if verbose:
+                print(f"   → Fiche détectée : {classification['fiche']}")
+                print(f"   → Confiance      : {classification.get('confiance', '?')}")
+                if classification['fiche'] == "INCONNUE":
+                    print("   ⚠️  ALERTE : aucune fiche identifiée — vérifier le VISA/document "
+                          "listant la fiche, ou indiquer la fiche manuellement (--fiche).")
+
         core_rules = loader.get_core_rules_text()
         variable_rules = loader.get_variable_rules_text(classification)
         if verbose:
-            print(f"   → Socle règles : ~{len(core_rules)//4:,} tk (caché) | "
-                  f"Variable : ~{len(variable_rules)//4:,} tk")
+            print(f"   → Socle : ~{len(core_rules)//4:,} tk | Variable : ~{len(variable_rules)//4:,} tk")
 
-        # --- 4. Appel API Claude ---
-        if verbose:
-            print("[4/4] Analyse par Claude...")
-
-        result = analyze_with_claude(
-            docs=docs,
-            core_rules_text=core_rules,
-            variable_rules_text=variable_rules,
-            classification=classification,
-            verbose=verbose,
-        )
+        if dry_run:
+            if verbose:
+                print("[4/4] Mode test — assemblage du prompt (aucun appel API)...")
+            result = run_dry_run(docs, core_rules, variable_rules, classification)
+        else:
+            if verbose:
+                print("[4/4] Analyse par Claude...")
+            result = analyze_with_claude(
+                docs=docs,
+                core_rules_text=core_rules,
+                variable_rules_text=variable_rules,
+                classification=classification,
+                verbose=verbose,
+            )
 
         result["classification"] = classification
         return result
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Analyseur de dossiers CEE - chargement sélectif des règles"
-    )
+    parser = argparse.ArgumentParser(description="Analyseur de dossiers CEE")
     parser.add_argument("input", help="Chemin vers le ZIP ou dossier de PDFs")
-    parser.add_argument(
-        "--rules",
-        default="./rules_data",
-        help="Dossier contenant les règles (défaut: ./rules_data)",
-    )
-    parser.add_argument(
-        "--output",
-        default=None,
-        help="Fichier JSON de sortie (défaut: affichage console)",
-    )
-    parser.add_argument("-v", "--verbose", action="store_true", help="Mode verbeux")
+    parser.add_argument("--rules", default="./rules_data")
+    parser.add_argument("--output", default=None)
+    parser.add_argument("--dry-run", action="store_true", help="Assemble le prompt sans appeler l'API (gratuit)")
+    parser.add_argument("--fiche", default=None, help="Impose la fiche BAR/BAT (ex: BAR-EN-105), contourne la classification")
+    parser.add_argument("-v", "--verbose", action="store_true")
 
     args = parser.parse_args()
 
     try:
-        result = process_dossier(args.input, args.rules, verbose=args.verbose)
-
+        result = process_dossier(args.input, args.rules, verbose=args.verbose, dry_run=args.dry_run, fiche_override=args.fiche)
         output = json.dumps(result, ensure_ascii=False, indent=2)
 
         if args.output:
@@ -134,13 +120,22 @@ def main():
             print(f"Résultat écrit dans : {args.output}")
         else:
             print("\n" + "=" * 60)
-            print("RÉSULTAT D'ANALYSE")
-            print("=" * 60)
-            print(f"Fiche applicable : {result['classification']['fiche']}")
-            print(f"Statut           : {result.get('statut', 'N/A')}")
-            print(f"Tokens utilisés  : {result.get('tokens_used', 'N/A')}")
-            print("\n--- Analyse détaillée ---")
-            print(result.get("analyse", ""))
+            if args.dry_run:
+                print("MODE TEST — AUCUN APPEL API")
+                print("=" * 60)
+                tk = result["tokens_estimation"]
+                print(f"Fiche détectée   : {result['classification']['fiche']}")
+                print(f"Tokens estimés   : {tk['total_input']:,} input + {tk['output_estime']:,} output")
+                print(f"Coût si réel     : ~{result['cout_estime_eur']['premier_appel']:.4f} € (1er appel)")
+                print(f"                   ~{result['cout_estime_eur']['appels_suivants_avec_cache']:.4f} € (avec cache)")
+            else:
+                print("RÉSULTAT D'ANALYSE")
+                print("=" * 60)
+                print(f"Fiche applicable : {result['classification']['fiche']}")
+                print(f"Statut           : {result.get('statut', 'N/A')}")
+                print(f"Tokens utilisés  : {result.get('tokens_used', 'N/A')}")
+                print("\n--- Analyse détaillée ---")
+                print(result.get("analyse", ""))
 
     except Exception as e:
         print(f"Erreur : {e}", file=sys.stderr)

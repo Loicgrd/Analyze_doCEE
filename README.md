@@ -1,143 +1,126 @@
 # CEE Analyzer — Analyseur de dossiers CEE
 
-Analyse automatique de dossiers CEE avec chargement **sélectif** des règles
-métier pour minimiser le coût en tokens (~8–12k tokens vs 80–120k si tout est chargé).
-
-## Architecture
-
-```
-cee_analyzer/
-├── analyzer.py          ← Point d'entrée principal
-├── setup_rules.py       ← Script de configuration des règles
-├── requirements.txt
-└── utils/
-    ├── extractor.py     ← Extraction texte PDF (+ OCR pour scans)
-    ├── classifier.py    ← Détection fiche BAR/BAT sans API
-    ├── rule_loader.py   ← Chargement sélectif des règles
-    └── claude_client.py ← Appel API Claude + assemblage prompt
-```
+Analyse automatique de dossiers CEE avec chargement **déterministe et sélectif**
+des règles métier (socle Markdown mis en cache + fiche BAR/BAT filtrée).
 
 ## Installation
 
 ```bash
 pip install -r requirements.txt
-
-# Outils système nécessaires (poppler)
-# Ubuntu/Debian :
 apt-get install poppler-utils tesseract-ocr tesseract-ocr-fra
-# macOS :
-brew install poppler tesseract
 ```
 
-## Configuration
+## Configuration de la clé API — sécurité
 
-1. **Copier les règles** depuis votre dossier de grimoires :
-
-```bash
-python setup_rules.py --source /chemin/vers/grimoires --dest ./rules_data
+**Sur Streamlit Community Cloud (recommandé pour le partage)** :
+Paramètres de l'app → onglet **Secrets** :
+```toml
+ANTHROPIC_API_KEY = "sk-ant-..."
 ```
+La clé n'apparaît jamais dans le code ni dans le repo Git.
 
-2. **Configurer la clé API** :
-
+**En local / serveur interne** :
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-## Utilisation
+**Jamais** en dur dans le code — même sur un repo privé.
 
-### En ligne de commande
+## Tester sans payer — mode dry-run
+
+L'app (et le CLI) proposent un **mode test** qui exécute tout le pipeline
+(extraction, OCR, classification, chargement des règles, assemblage du prompt)
+SANS appeler l'API Claude. Utile pour vérifier que l'extraction et le routage
+des règles fonctionnent avant de payer un vrai appel.
 
 ```bash
-# Analyser un ZIP
-python analyzer.py ./dossiers/T155418.zip --rules ./rules_data -v
-
-# Analyser un dossier de PDFs
-python analyzer.py ./dossiers/T155418/ --rules ./rules_data
-
-# Sauvegarder le résultat en JSON
-python analyzer.py ./dossiers/T155418.zip --rules ./rules_data --output result.json
+python analyzer.py ./dossier.zip --rules ./rules_data --dry-run -v
 ```
 
-### En Python
+Dans l'app Streamlit : activer le toggle "🧪 Mode test" dans la barre latérale.
 
-```python
-from analyzer import process_dossier
+> Anthropic offre généralement un crédit gratuit initial à la création d'un
+> compte API — vérifiez le montant sur console.anthropic.com.
+> Pensez aussi à définir une limite de dépense mensuelle sur la console pour
+> vous protéger d'un usage excessif si l'app est partagée.
 
-result = process_dossier(
-    input_path="./dossiers/T155418.zip",
-    rules_dir="./rules_data",
-    verbose=True,
-)
+## Utilisation normale
 
-print(result["statut"])       # VALIDE / NON VALIDE / INCOMPLET
-print(result["analyse"])      # Analyse complète structurée
-print(result["tokens_used"])  # {"input": 9800, "output": 1200, "total": 11000}
+```bash
+python setup_rules.py --source /chemin/vers/grimoires --dest ./rules_data
+export ANTHROPIC_API_KEY="sk-ant-..."
+python analyzer.py ./dossier.zip --rules ./rules_data -v
 ```
 
-### Intégration dans une API web (FastAPI)
-
-```python
-from fastapi import FastAPI, UploadFile
-from analyzer import process_dossier
-import tempfile, shutil
-
-app = FastAPI()
-
-@app.post("/analyze")
-async def analyze(file: UploadFile):
-    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = tmp.name
-
-    result = process_dossier(tmp_path, rules_dir="./rules_data")
-    return result
+```bash
+streamlit run app.py
 ```
 
-## Logique de chargement sélectif
+## Ajouter un grimoire (une fois réécrit en Markdown)
 
-| Toujours chargé | Conditionnel |
+Déposer le fichier dans `rules_data/` — aucune modification de code requise :
+
+| Nom du fichier | Comportement |
 |---|---|
-| `Règles_validation.csv` | Grimoire fiche (ex: `GRIMOIRE__BARTH130.pdf`) |
-| `Doc_Récapitulatif_*.csv` (x5) | `GRIMOIRE__Soustraitance.pdf` si sous-traitant |
-| `GRIMOIRE__Preuves_*.pdf` (x2) | `GRIMOIRE__Coup_de_pouce_*.pdf` si CDP |
-| `GRIMOIRE__RGE.pdf` | `GRIMOIRE__Ordre_de_service.pdf` selon type engagement |
-| `GRIMOIRE__Attestation.pdf` | CSV Fiche filtré sur la fiche cible |
-| Fiche BAR/BAT (lignes filtrées) | |
+| `GRIMOIRE__NomGenerique.md` (pas de code fiche) | Rejoint le socle, chargé à chaque analyse (caché) |
+| `GRIMOIRE__BARTH130.md` (code fiche détecté) | Chargé seulement quand cette fiche est identifiée |
 
-**Résultat : ~8–12k tokens envoyés** au lieu de 80–120k si tous les grimoires
-étaient inclus, soit une **réduction de ~90% du coût**.
+## Évaluation de fiabilité
 
-## Variables d'environnement
-
-| Variable | Description | Défaut |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | Clé API Anthropic | *(obligatoire)* |
-
-## Exemple de sortie
-
+```bash
+# 1. Déposer des ZIPs de test dans eval/dossiers/
+# 2. Remplir eval/expected_results.json avec les verdicts attendus
+python eval/run_eval.py --rules ./rules_data
 ```
-[1/4] Extraction de : T155418.zip
-[2/4] Lecture de 4 PDF(s)...
-   • 155418 visa: DEMANDE D'UN VISA TRAVAUX OU NEUF...
-   • rea 155418: Décompte Général Définitif...
-   • rge 155418: CERTIFICAT QUALIBAT « RGE »...
-   • eng 155418 [SCANNÉ]: Seine-Saint-Denis habitat...
-[3/4] Classification du dossier...
-   → Fiche détectée : BAR-EN-105
-   → Type secteur   : BAR
-   → Coup de pouce  : False
-[4/4] Analyse par Claude...
-   → ~10,400 tokens envoyés
 
-============================================================
-RÉSULTAT D'ANALYSE
-============================================================
-Fiche applicable : BAR-EN-105
-Statut           : INCOMPLET
-Tokens utilisés  : {'input': 10400, 'output': 1850, 'total': 12250}
+## Architecture des tokens
 
---- Analyse détaillée ---
-## FICHE BAR/BAT APPLICABLE
-BAR-EN-105 A39.3 — Isolation en toiture terrasse
-...
-```
+| Bloc | Contenu | Taille | Cache |
+|---|---|---|---|
+| Socle | 6 règles Doc en Markdown | ~6 500 tk | ✅ Caché (10% du tarif dès le 2e appel) |
+| Variable | Fiche BAR/BAT filtrée + documents du dossier | ~1 000 à 8 000 tk selon dossier | ❌ Plein tarif |
+
+**Coût mesuré sur des dossiers réels : ~0,03 à 0,07 € par dossier.**
+
+## OCR multi-pages
+
+Les documents scannés volumineux (ex: DGD de 20+ pages) sont OCRisés avec
+`ocr_pdf_smart()` : par défaut les 3 premières + 3 dernières pages (6 pages
+max), car les informations utiles (identification, objet, totaux, signatures)
+s'y trouvent le plus souvent. Ajustable via `max_pages_ocr` dans
+`utils/extractor.py` si vos documents ont une structure différente.
+
+**Limite connue** : si l'information clé (ex: code fiche BAR/BAT) se trouve
+sur une page intermédiaire non couverte, ou si aucun document du dossier ne
+mentionne explicitement la fiche, la classification retourne "INCONNUE" —
+c'est un comportement volontaire (mieux vaut un statut explicite qu'une
+fiche devinée à tort). L'app et le CLI affichent une alerte visible dans ce
+cas, invitant à vérifier manuellement.
+
+
+## Classification de la fiche — 3 modes
+
+Beaucoup de dossiers ne mentionnent **jamais explicitement** le code fiche
+(BAR-EN-105...) dans leurs documents — c'est le cas le plus fréquent. Trois
+stratégies, utilisables ensemble :
+
+1. **Regex (gratuit, instantané)** : si le code est écrit tel quel dans un
+   document, il est trouvé directement, sans appel API.
+2. **IA sémantique (Sonnet, ~0,01-0,02€)** : si aucun code n'est trouvé, le
+   classifier passe la nature des travaux décrits (matériaux, épaisseurs,
+   équipements facturés) à Sonnet, avec la **nomenclature officielle**
+   extraite de vos CSV Fiche Récapitulatif (`get_fiche_correspondance_table()`)
+   pour éviter qu'il invente un code non existant.
+3. **Manuel** : `--fiche BAR-EN-105` en CLI, ou le sélecteur "Manuelle" dans
+   l'app Streamlit — contourne totalement la détection, recommandé si vous
+   connaissez déjà le dossier ou si les deux modes précédents hésitent
+   (`confiance: "faible"`).
+
+## Note sur l'encodage des CSV
+
+Les fichiers `Fiche_Récapitulatif_*.csv` sont en encodage **Mac Roman**
+(export Excel Mac), pas Latin-1 comme on pourrait le supposer par défaut.
+`RuleLoader._read_file()` détecte automatiquement le bon encodage parmi
+plusieurs candidats (mac_roman, cp850, latin-1, utf-8) en choisissant celui
+qui produit le moins d'erreurs de décodage — aucune configuration requise,
+mais utile à savoir si vous ouvrez ces CSV vous-même dans un éditeur de code.
