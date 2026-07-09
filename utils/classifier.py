@@ -234,20 +234,28 @@ def classify_dossier_regex(docs: Dict[str, dict]) -> Dict:
     }
 
 
-def classify_dossier(docs: Dict[str, dict], correspondance_table: str = "") -> Dict:
+def classify_dossier(
+    docs: Dict[str, dict],
+    correspondance_table: str = "",
+    use_correspondance_table: bool = True,
+) -> Dict:
     """
     Point d'entrée principal.
 
     Stratégie : essaye d'abord le regex (gratuit, instantané). S'il trouve un
     code fiche explicite, on le garde tel quel (haute confiance, aucun coût).
     Sinon, bascule sur la classification IA (Sonnet) qui raisonne sur la
-    nature des travaux avec la nomenclature officielle — c'est le cas le plus
-    fréquent en pratique, la plupart des documents ne citent pas le code fiche.
+    nature des travaux — c'est le cas le plus fréquent en pratique, la
+    plupart des documents ne citent pas le code fiche.
 
     Args:
         correspondance_table: table fiche<->travaux, à passer depuis
-            RuleLoader.get_fiche_correspondance_table() pour de meilleurs
-            résultats en mode IA.
+            RuleLoader.get_fiche_correspondance_table().
+        use_correspondance_table: si False, la table n'est PAS envoyée au
+            modèle même si fournie — Claude s'appuie alors uniquement sur sa
+            connaissance générale des fiches CEE. Permet un test A/B pour
+            vérifier empiriquement sur vos dossiers si la table change
+            réellement les résultats (voir eval/run_eval.py --no-table).
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
 
@@ -267,7 +275,10 @@ def classify_dossier(docs: Dict[str, dict], correspondance_table: str = "") -> D
         )
         return regex_result
 
-    return classify_dossier_ia(docs, correspondance_table=correspondance_table)
+    table_to_use = correspondance_table if use_correspondance_table else ""
+    result = classify_dossier_ia(docs, correspondance_table=table_to_use)
+    result["_table_utilisee"] = bool(table_to_use)
+    return result
 
 
 def _known_fiches_from_patterns() -> set:
