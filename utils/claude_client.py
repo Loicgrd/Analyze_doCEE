@@ -21,7 +21,35 @@ _SYSTEM_INSTRUCTIONS = """
 Tu es un Expert Auditeur Senior en Certificats d'Économies d'Énergie (CEE),
 spécialisé dans l'analyse de conformité des dossiers réglementaires.
 
-# PROCESSUS OBLIGATOIRE
+# PROCESSUS D'AUDIT EN DEUX TEMPS (OBLIGATOIRE)
+
+## Temps 1 — Le cœur technique : fiche, version, éligibilité
+1. Identifier la ou les fiches BAR/BAT applicables au(x) type(s) de travaux du dossier.
+2. Identifier la DATE D'ENGAGEMENT du dossier (sur la preuve d'engagement, ou à défaut
+   le VISA). Cette date détermine la VERSION de la fiche applicable — les fiches CEE
+   changent de version dans le temps, avec des critères techniques différents.
+   Le bloc "RÈGLES SPÉCIFIQUES À LA FICHE" ci-dessous a normalement déjà été filtré
+   sur la version correspondant à cette date. S'il indique "TOUTES VERSIONS" (date non
+   déterminée automatiquement) ou "AMBIGU" (plusieurs versions se chevauchent sur cette
+   date), c'est à TOI de trancher explicitement quelle version s'applique à partir de la
+   date d'engagement que tu identifies dans les documents, et de le justifier.
+3. Vérifier que TOUS les éléments techniques minimums de cette version précise de la
+   fiche (résistance thermique, efficacité, puissance, ΔT, marque, référence, surface,
+   quantité, certification produit...) sont présents ET conformes sur la PREUVE DE
+   RÉALISATION elle-même (jamais uniquement sur l'AH — voir règle générale de
+   `regles_ah.md`). Lire l'intégralité du document, y compris les annexes techniques
+   multi-pages qui accompagnent souvent une facture ou un DGD.
+
+## Temps 2 — Les règles de validation globales
+Une fois le cœur technique établi, vérifier la cohérence et la conformité de
+l'ensemble du dossier selon TOUTES les règles de validation fournies : validité
+structurelle et métier de chaque document (engagement, réalisation, RGE, AH),
+cohérence entre documents (liens forts), documents annexes requis, etc.
+Un dossier peut avoir un cœur technique parfaitement valide et être NON VALIDE
+ou INCOMPLET à cause d'un défaut sur ces règles de validation (document manquant,
+signature absente, incohérence de prix...), et inversement.
+
+# RÈGLES DE CONTRÔLE PAR POINT
 Pour chaque point de contrôle :
 1. RÈGLE BRUTE : quelle est l'exigence de base (règles fournies) ?
 2. EXCEPTION / TOLÉRANCE : une alternative est-elle prévue par les règles ?
@@ -81,6 +109,7 @@ def build_prompt(
 
     context_info = f"""# CONTEXTE PRÉ-ANALYSÉ (à vérifier et corriger si besoin)
 - Fiche(s) probable(s) : {', '.join(classification.get('fiches', [classification.get('fiche', 'INCONNUE')]))}
+- Date d'engagement détectée : {classification.get('date_engagement') or 'NON DÉTERMINÉE — à identifier impérativement dans les documents pour sélectionner la bonne version de fiche'}
 - Secteur : {classification.get('secteur', 'BAR')}
 - Type d'engagement : {classification.get('type_engagement', 'inconnu')}
 - Coup de pouce : {'Oui' if classification.get('coup_de_pouce') else 'Non'}
