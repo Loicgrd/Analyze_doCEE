@@ -46,7 +46,7 @@ Ta mission : identifier la fiche BAR ou BAT applicable en te basant sur :
 {table_block}
 Réponds UNIQUEMENT en JSON valide, sans texte avant ou après, avec exactement ces clés :
 {{
-  "fiche": "BAR-EN-105",
+  "fiches": ["BAR-EN-105"],
   "secteur": "BAR",
   "coup_de_pouce": false,
   "type_engagement": "ordre_de_service",
@@ -56,8 +56,16 @@ Réponds UNIQUEMENT en JSON valide, sans texte avant ou après, avec exactement 
 }}
 
 Valeurs possibles :
-- fiche : code exact présent dans la nomenclature fournie, ou "INCONNUE" si aucune
-  correspondance raisonnable n'est identifiable
+- fiches : LISTE de codes exacts présents dans la nomenclature fournie. La plupart des
+  dossiers n'ont qu'UNE fiche -> liste à un seul élément (ex: ["BAR-EN-105"]). Mais un
+  dossier peut couvrir PLUSIEURS fiches simultanément si plusieurs types de travaux
+  distincts sont facturés/décrits pour un même marché (ex: un lot "chauffage-ventilation"
+  qui inclut une chaudière (BAR-TH-106) ET une VMC (BAR-TH-127) ET des radiateurs
+  (BAR-TH-110) ET un désembouage (BAR-SE-108) dans le même décompte de travaux).
+  Liste ["INCONNUE"] si aucune correspondance raisonnable n'est identifiable.
+  N'ajoute une fiche à la liste QUE si des éléments techniques concrets et distincts
+  justifient chacune séparément — ne liste pas une fiche juste parce qu'elle apparaît
+  sur un VISA déclaratif sans travaux correspondants dans les documents.
 - secteur : "BAR" (résidentiel) ou "BAT" (tertiaire)
 - coup_de_pouce : true/false
 - type_engagement : "ordre_de_service" | "bon_de_commande" | "acte_engagement" | "devis" | "inconnu"
@@ -139,7 +147,9 @@ def classify_dossier_ia(
         raw = re.sub(r"\s*```$", "", raw)
         result = json.loads(raw)
 
-        result.setdefault("fiche", "INCONNUE")
+        result.setdefault("fiches", ["INCONNUE"])
+        if "fiche" in result and "fiches" not in result:  # rétrocompatibilité si le modèle répond à l'ancien format
+            result["fiches"] = [result.pop("fiche")]
         result.setdefault("secteur", "BAR")
         result.setdefault("coup_de_pouce", False)
         result.setdefault("type_engagement", "inconnu")
@@ -223,14 +233,16 @@ def classify_dossier_regex(docs: Dict[str, dict]) -> Dict:
     ) else "BAR"
 
     return {
-        "fiche": fiche_detected or "INCONNUE",
+        "fiches": [fiche_detected] if fiche_detected else ["INCONNUE"],
         "secteur": secteur,
         "coup_de_pouce": any(k in full_text_lower for k in ["coup de pouce", "cdp", "charte"]),
         "type_engagement": _detect_engagement_type(full_text_lower),
         "sous_traitance": any(k in full_text_lower for k in ["sous-traitant", "dc4"]),
         "confiance": "moyenne",
         "raisonnement": "Classification par regex (sans IA) — fiable seulement si le code "
-                         "fiche ou un mot-clé générique est explicitement écrit",
+                         "fiche ou un mot-clé générique est explicitement écrit. Le regex ne "
+                         "détecte qu'UNE fiche à la fois : si le dossier en couvre plusieurs, "
+                         "utiliser la classification IA ou le mode manuel multi-fiches.",
     }
 
 
@@ -260,10 +272,16 @@ def classify_dossier(
     api_key = os.environ.get("ANTHROPIC_API_KEY")
 
     regex_result = classify_dossier_regex(docs)
-    if regex_result["fiche"] != "INCONNUE" and regex_result["fiche"] in _known_fiches_from_patterns():
-        # Code fiche trouvé explicitement dans le texte -> fiable, pas besoin d'IA
+    single_fiche = regex_result["fiches"][0] if regex_result["fiches"] else "INCONNUE"
+    if single_fiche != "INCONNUE" and single_fiche in _known_fiches_from_patterns():
+        # Code fiche trouvé explicitement dans le texte -> fiable, pas besoin d'IA.
+        # Note : le regex ne peut confirmer qu'UNE fiche explicite à la fois. Si le
+        # dossier en contient réellement plusieurs, l'IA (appelée si confiance jugée
+        # insuffisante par l'utilisateur) ou le mode manuel doivent prendre le relai.
         regex_result["confiance"] = "haute"
-        regex_result["raisonnement"] = "Code fiche trouvé explicitement dans les documents"
+        regex_result["raisonnement"] = ("Code fiche trouvé explicitement dans les documents. "
+                                          "Si le dossier couvre plusieurs fiches, vérifier "
+                                          "manuellement ou forcer le mode IA.")
         return regex_result
 
     if not api_key:
