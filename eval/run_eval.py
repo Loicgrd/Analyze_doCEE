@@ -74,7 +74,12 @@ def main():
         print(f"▶  Analyse de {entry['fichier']}...")
         res = process_dossier(str(zip_path), args.rules, use_correspondance_table=not args.no_table)
 
-        fiche_ok = res["classification"]["fiche"] == att["fiche"]
+        fiches_obtenues = res["classification"].get("fiches", [res["classification"].get("fiche", "INCONNUE")])
+        fiches_obtenues_str = ", ".join(fiches_obtenues)
+        # att["fiche"] reste un champ unique dans expected_results.json par simplicité ;
+        # pour un dossier multi-fiches, on considère OK si la fiche attendue fait partie
+        # des fiches détectées (utile si vous ne voulez tester qu'une fiche du lot).
+        fiche_ok = att["fiche"] in fiches_obtenues
         statut_ok = res["statut"] == att["statut"]
 
         points = att.get("points_bloquants_attendus", [])
@@ -87,7 +92,7 @@ def main():
 
         results.append({
             "fichier": entry["fichier"],
-            "fiche": {"attendu": att["fiche"], "obtenu": res["classification"]["fiche"], "ok": fiche_ok},
+            "fiche": {"attendu": att["fiche"], "obtenu": fiches_obtenues_str, "ok": fiche_ok},
             "statut": {"attendu": att["statut"], "obtenu": res["statut"], "ok": statut_ok},
             "points_bloquants": points_status,
             "points_ok": points_ok,
@@ -181,9 +186,10 @@ def _run_all(rules_dir: str, only: str, use_table: bool):
             continue
         print(f"▶  {entry['fichier']}...")
         res = process_dossier(str(zip_path), rules_dir, use_correspondance_table=use_table)
+        fiches_obtenues = res["classification"].get("fiches", [res["classification"].get("fiche", "INCONNUE")])
         results.append({
             "fichier": entry["fichier"],
-            "fiche": {"attendu": att["fiche"], "obtenu": res["classification"]["fiche"]},
+            "fiche": {"attendu": att["fiche"], "obtenu": ", ".join(fiches_obtenues)},
             "statut": {"attendu": att["statut"], "obtenu": res["statut"]},
         })
     return results
