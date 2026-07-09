@@ -57,26 +57,32 @@ class RuleLoader:
                     loaded.append(path.name)
 
         secteur = classification.get("secteur", "BAR")
-        fiche = classification.get("fiche", "INCONNUE")
+        fiches = classification.get("fiches")
+        if fiches is None:
+            single = classification.get("fiche", "INCONNUE")
+            fiches = [single] if single else ["INCONNUE"]
+        fiches = [f for f in fiches if f and f != "INCONNUE"]
         csv_name = FICHE_CSV.get(secteur)
-        if csv_name:
-            text = self._read_csv_filtered(csv_name, fiche)
-            if text:
-                bundle[f"FICHE:{csv_name}"] = text
-                loaded.append(f"{csv_name} (filtré: {fiche})")
 
-        for path in sorted(self.rules_dir.glob("GRIMOIRE__*.md")):
-            if self._extract_fiche_code(path.name) == fiche:
-                text = self._read_file(path.name, encoding="utf-8")
+        for fiche in fiches:
+            if csv_name:
+                text = self._read_csv_filtered(csv_name, fiche)
                 if text:
-                    bundle[f"FICHE:{path.name}"] = text
-                    loaded.append(path.name)
+                    bundle[f"FICHE:{csv_name}:{fiche}"] = text
+                    loaded.append(f"{csv_name} (filtré: {fiche})")
 
-        if classification.get("coup_de_pouce"):
-            text = self._read_csv_filtered(CDP_CSV, fiche)
-            if text:
-                bundle[f"CDP:{CDP_CSV}"] = text
-                loaded.append(f"{CDP_CSV} (filtré: {fiche})")
+            for path in sorted(self.rules_dir.glob("GRIMOIRE__*.md")):
+                if self._extract_fiche_code(path.name) == fiche:
+                    text = self._read_file(path.name, encoding="utf-8")
+                    if text:
+                        bundle[f"FICHE:{path.name}"] = text
+                        loaded.append(path.name)
+
+            if classification.get("coup_de_pouce"):
+                text = self._read_csv_filtered(CDP_CSV, fiche)
+                if text:
+                    bundle[f"CDP:{CDP_CSV}:{fiche}"] = text
+                    loaded.append(f"{CDP_CSV} (filtré: {fiche})")
 
         if verbose:
             total = sum(len(v) for v in bundle.values())
@@ -101,27 +107,41 @@ class RuleLoader:
         return "\n\n".join(parts)
 
     def get_variable_rules_text(self, classification: Dict) -> str:
-        """Partie variable : fiche filtrée + grimoire spécifique à la fiche — hors cache."""
+        """
+        Partie variable : fiches filtrées + grimoires spécifiques — hors cache.
+
+        Gère un dossier multi-fiches : classification["fiches"] est une liste.
+        Rétrocompatible avec l'ancien format classification["fiche"] (str unique).
+        """
         parts = []
         secteur = classification.get("secteur", "BAR")
-        fiche = classification.get("fiche", "INCONNUE")
+        fiches = classification.get("fiches")
+        if fiches is None:
+            single = classification.get("fiche", "INCONNUE")
+            fiches = [single] if single else ["INCONNUE"]
+        fiches = [f for f in fiches if f and f != "INCONNUE"]
 
-        for path in sorted(self.rules_dir.glob("GRIMOIRE__*.md")):
-            if self._extract_fiche_code(path.name) == fiche:
-                text = self._read_file(path.name, encoding="utf-8")
-                if text:
-                    parts.append(f"--- {path.name} ---\n{text}")
+        if not fiches:
+            return ""
 
         csv_name = FICHE_CSV.get(secteur)
-        if csv_name:
-            text = self._read_csv_filtered(csv_name, fiche)
-            if text:
-                parts.append(f"--- {csv_name} (fiche {fiche}) ---\n{text}")
 
-        if classification.get("coup_de_pouce"):
-            text = self._read_csv_filtered(CDP_CSV, fiche)
-            if text:
-                parts.append(f"--- {CDP_CSV} (fiche {fiche}) ---\n{text}")
+        for fiche in fiches:
+            for path in sorted(self.rules_dir.glob("GRIMOIRE__*.md")):
+                if self._extract_fiche_code(path.name) == fiche:
+                    text = self._read_file(path.name, encoding="utf-8")
+                    if text:
+                        parts.append(f"--- {path.name} ---\n{text}")
+
+            if csv_name:
+                text = self._read_csv_filtered(csv_name, fiche)
+                if text:
+                    parts.append(f"--- {csv_name} (fiche {fiche}) ---\n{text}")
+
+            if classification.get("coup_de_pouce"):
+                text = self._read_csv_filtered(CDP_CSV, fiche)
+                if text:
+                    parts.append(f"--- {CDP_CSV} (fiche {fiche}) ---\n{text}")
 
         return "\n\n".join(parts)
 
