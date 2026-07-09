@@ -23,8 +23,14 @@ MD_CORE = [
     "regles_autres_documents.md",
 ]
 
+# Nouveau format Excel enrichi (colonnes obligatoire/non-obligatoire distinctes,
+# dates réelles, disponible pour BAR). Le format CSV legacy reste utilisé pour BAT
+# tant qu'un fichier Excel équivalent n'a pas été fourni pour ce secteur.
+FICHE_XLSX = {
+    "BAR": "Fiche_BAR.xlsx",
+}
 FICHE_CSV = {
-    "BAR": "Fiche__Récapitulatif_des_fiches_BAR.csv",
+    "BAR": "Fiche__Récapitulatif_des_fiches_BAR.csv",  # fallback si Fiche_BAR.xlsx absent
     "BAT": "Fiche__Récapitulatif_des_fiches_BAT.csv",
 }
 
@@ -108,13 +114,19 @@ class RuleLoader:
 
     def get_variable_rules_text(self, classification: Dict) -> str:
         """
-        Partie variable : fiches filtrées + grimoires spécifiques — hors cache.
+        Partie variable : fiches filtrées PAR VERSION + grimoires spécifiques — hors cache.
+
+        Cœur du dispositif : utilise classification["date_engagement"] (si disponible)
+        pour ne charger que la version de chaque fiche applicable à cette date
+        (colonnes DEBUT/FIN D'APPLICATION du CSV Fiche), plutôt que toutes les
+        versions. Réduit les tokens et élimine l'ambiguïté de version pour Claude.
 
         Gère un dossier multi-fiches : classification["fiches"] est une liste.
         Rétrocompatible avec l'ancien format classification["fiche"] (str unique).
         """
         parts = []
         secteur = classification.get("secteur", "BAR")
+        date_engagement = classification.get("date_engagement")
         fiches = classification.get("fiches")
         if fiches is None:
             single = classification.get("fiche", "INCONNUE")
@@ -124,7 +136,9 @@ class RuleLoader:
         if not fiches:
             return ""
 
+        xlsx_name = FICHE_XLSX.get(secteur)
         csv_name = FICHE_CSV.get(secteur)
+        version_notes = []
 
         for fiche in fiches:
             for path in sorted(self.rules_dir.glob("GRIMOIRE__*.md")):
@@ -133,10 +147,34 @@ class RuleLoader:
                     if text:
                         parts.append(f"--- {path.name} ---\n{text}")
 
-            if csv_name:
-                text = self._read_csv_filtered(csv_name, fiche)
-                if text:
-                    parts.append(f"--- {csv_name} (fiche {fiche}) ---\n{text}")
+            # Priorité au référentiel Excel enrichi (obligatoire/non-obligatoire
+            # distincts, dates réelles) ; repli sur le CSV legacy si absent pour
+            # ce secteur (ex: BAT tant qu'aucun Excel équivalent n'existe).
+            result = None
+            source_label = None
+            if xlsx_name and (self.rules_dir / xlsx_name).exists():
+                result = self._read_xlsx_filtered_by_date(xlsx_name, fiche, date_engagement)
+                source_label = xlsx_name
+            if (result is None or not result.get("found")) and csv_name:
+                result = self._read_csv_filtered_by_date(csv_name, fiche, date_engagement)
+                source_label = csv_name
+
+            if result and result["text"]:
+                label_bits = [f"fiche {fiche}"]
+                if result["no_date"]:
+                    label_bits.append("TOUTES VERSIONS — date d'engagement non fournie, "
+                                       "à déterminer depuis les documents et à recouper "
+                                       "manuellement avec les périodes d'application ci-dessous")
+                elif result["ambiguous"]:
+                    label_bits.append(f"⚠️ AMBIGU — plusieurs versions couvrent la date "
+                                       f"{date_engagement} ({', '.join(result['versions_matched'])}) "
+                                       f"— la plus récente est listée en premier, à trancher explicitement")
+                elif result["versions_matched"]:
+                    label_bits.append(f"version applicable au {date_engagement} : "
+                                       f"{result['versions_matched'][0]}")
+                parts.append(f"--- {source_label} ({', '.join(label_bits)}) ---\n{result['text']}")
+                if result["ambiguous"]:
+                    version_notes.append(fiche)
 
             if classification.get("coup_de_pouce"):
                 text = self._read_csv_filtered(CDP_CSV, fiche)
@@ -235,6 +273,10 @@ class RuleLoader:
         return best_text
 
     def _read_csv_filtered(self, filename: str, fiche: str) -> Optional[str]:
+        """Retourne TOUTES les versions d'une fiche (comportement générique, sans
+        connaissance de la date d'engagement). Préférer _read_csv_filtered_by_date()
+        quand une date d'engagement est disponible, pour ne charger que la version
+        applicable — plus fiable et moins coûteux en tokens."""
         full_text = self._read_file(filename, encoding="latin-1")
         if not full_text:
             return None
@@ -254,3 +296,210 @@ class RuleLoader:
         if len(filtered) <= 1:
             return "\n".join(lines[:50])
         return "\n".join(filtered)
+
+    def _read_xlsx_filtered_by_date(
+        self, filename: str, fiche: str, date_engagement: Optional[str]
+    ) -> Dict[str, object]:
+        """
+        Équivalent de _read_csv_filtered_by_date() pour le nouveau format Excel
+        enrichi (colonnes obligatoire/non-obligatoire distinctes, dates réelles).
+        Formate le résultat en Markdown lisible plutôt qu'en ligne CSV brute,
+        pour une meilleure lecture par Claude et une consommation de tokens
+        équivalente ou meilleure (pas de répétition des noms de colonnes vides).
+        """
+        import pandas as pd
+        from datetime import datetime
+
+        path = self.rules_dir / filename
+        if not path.exists():
+            return {"text": "", "versions_matched": [], "ambiguous": False,
+                     "no_date": True, "found": False}
+
+        cache_key = f"xlsx_df:{filename}"
+        if cache_key not in self._cache:
+            self._cache[cache_key] = pd.read_excel(path)
+        df = self._cache[cache_key]
+
+        fiche_base = fiche.replace("-", "").upper()
+        # La colonne FICHE contient "BAR-EN-101\nA14.1" (code + version sur 2 lignes)
+        code_col = df["FICHE"].astype(str).str.split("\n").str[0].str.replace("-", "").str.strip().str.upper()
+        rows = df[code_col == fiche_base]
+
+        if rows.empty:
+            return {"text": "", "versions_matched": [], "ambiguous": False,
+                     "no_date": True, "found": False}
+
+        debut_col = "DEBUT D'APPLICATION "
+        fin_col = "FIN D'APPLICATION "
+
+        if not date_engagement:
+            return {"text": self._format_xlsx_rows(rows), "versions_matched": [],
+                     "ambiguous": False, "no_date": True, "found": True}
+
+        try:
+            dt_engagement = datetime.strptime(date_engagement.strip(), "%d/%m/%Y")
+        except ValueError:
+            return {"text": self._format_xlsx_rows(rows), "versions_matched": [],
+                     "ambiguous": False, "no_date": True, "found": True}
+
+        def _in_range(row):
+            debut = row.get(debut_col)
+            fin = row.get(fin_col)
+            if pd.notna(debut) and dt_engagement < debut:
+                return False
+            if pd.notna(fin) and dt_engagement > fin:
+                return False
+            return True
+
+        matched = rows[rows.apply(_in_range, axis=1)]
+
+        if matched.empty:
+            # Aucune version ne couvre cette date -> renvoyer tout + signaler
+            return {"text": self._format_xlsx_rows(rows), "versions_matched": [],
+                     "ambiguous": False, "no_date": False, "found": True}
+
+        versions = [str(v).replace("\n", " ").strip() for v in matched["FICHE"]]
+
+        if len(matched) == 1:
+            return {"text": self._format_xlsx_rows(matched), "versions_matched": versions,
+                     "ambiguous": False, "no_date": False, "found": True}
+
+        # Chevauchement de versions sur cette date : la plus récente en premier
+        matched_sorted = matched.sort_values(by=debut_col, ascending=False)
+        versions_sorted = [str(v).replace("\n", " ").strip() for v in matched_sorted["FICHE"]]
+        return {"text": self._format_xlsx_rows(matched_sorted), "versions_matched": versions_sorted,
+                 "ambiguous": True, "no_date": False, "found": True}
+
+    @staticmethod
+    def _format_xlsx_rows(rows) -> str:
+        """Formate les lignes du référentiel Excel en Markdown lisible."""
+        import pandas as pd
+
+        blocks = []
+        for _, row in rows.iterrows():
+            fiche_label = str(row.get("FICHE", "")).replace("\n", " ").strip()
+            lines = [f"#### {fiche_label} — {row.get('TRAVAUX', '')}"]
+
+            debut = row.get("DEBUT D'APPLICATION ")
+            fin = row.get("FIN D'APPLICATION ")
+            debut_s = debut.strftime("%d/%m/%Y") if pd.notna(debut) else "?"
+            fin_s = fin.strftime("%d/%m/%Y") if pd.notna(fin) else "non définie"
+            lines.append(f"*Période d'application : {debut_s} → {fin_s}*")
+
+            field_labels = [
+                ("CONDITIONS TECHNIQUES D'ELIGIBILITE AUX CEE", "**Conditions techniques d'éligibilité (seuils minimums)**"),
+                ("MENTIONS OBLIGATOIRES SUR LA PREUVE DE REALISATION", "**Mentions OBLIGATOIRES sur la preuve de réalisation**"),
+                ("MENTION NON OBLIGATOIRE SUR LA PREUVE DE REALISAITON MAIS NECESSAIRE", "**Mentions non obligatoires mais nécessaires (tolérance possible)**"),
+                ("QUALIFICATION DU PROFESSIONNEL", "**Qualification du professionnel requise**"),
+                ("CONDITIONS SUPPLEMENTAIRES POUR LE COUP DE POUCE", "**Conditions Coup de Pouce (si applicable)**"),
+                ("ELIGIBILITE AUX CONTROLES\n(Date d'engagement)", "**Éligibilité aux contrôles**"),
+                ("FICHES\nINCOMPATIBILITE ", "**Fiches incompatibles**"),
+            ]
+            for col, label in field_labels:
+                val = row.get(col)
+                if pd.notna(val) and str(val).strip():
+                    lines.append(f"{label} :\n{str(val).strip()}")
+
+            blocks.append("\n".join(lines))
+
+        return "\n\n".join(blocks)
+
+    def _read_csv_filtered_by_date(
+        self, filename: str, fiche: str, date_engagement: Optional[str]
+    ) -> Dict[str, object]:
+        """
+        Filtre le CSV Fiche sur LA version applicable à la date d'engagement,
+        au lieu de renvoyer toutes les versions. C'est le cœur du dispositif :
+        chaque fiche a plusieurs versions (A14, A27, A39...) avec des périodes
+        d'application et des critères techniques potentiellement différents —
+        seule la version couvrant la date d'engagement du dossier doit être
+        utilisée pour vérifier les éléments techniques minimums.
+
+        Returns:
+            {
+                "text": str,            # ligne(s) CSV retenue(s)
+                "versions_matched": [str],  # codes fiche exacts retenus (ex: "BAR-EN-101 A54.5")
+                "ambiguous": bool,      # True si plusieurs versions se chevauchent sur cette date
+                "no_date": bool,        # True si aucune date d'engagement fournie -> fallback toutes versions
+            }
+        """
+        import csv as _csv
+        import io as _io
+        from datetime import datetime
+
+        full_text = self._read_file(filename, encoding="latin-1")
+        if not full_text or fiche == "INCONNUE":
+            return {"text": full_text[:3000] if full_text else "", "versions_matched": [],
+                    "ambiguous": False, "no_date": True}
+
+        if not date_engagement:
+            # Pas de date -> comportement de repli : toutes les versions
+            text = self._read_csv_filtered(filename, fiche)
+            return {"text": text or "", "versions_matched": [], "ambiguous": False, "no_date": True}
+
+        try:
+            dt_engagement = datetime.strptime(date_engagement.strip(), "%d/%m/%Y")
+        except ValueError:
+            text = self._read_csv_filtered(filename, fiche)
+            return {"text": text or "", "versions_matched": [], "ambiguous": False, "no_date": True}
+
+        reader = _csv.DictReader(_io.StringIO(full_text, newline=""), delimiter=";")
+        fiche_base = fiche.replace("-", "").upper()
+        matches = []
+
+        for row in reader:
+            fiche_raw = (row.get("FICHE") or "").strip()
+            if not fiche_raw:
+                continue
+            if fiche_base not in fiche_raw.upper().replace("-", ""):
+                continue
+
+            debut_str = (row.get("DEBUT D'APPLICATION (Date d'engagement)") or "").strip()
+            fin_str = (row.get("FIN D'APPLICATION (Date d'engagement)") or "").strip()
+            try:
+                debut = datetime.strptime(debut_str, "%d/%m/%Y") if debut_str else None
+            except ValueError:
+                debut = None
+            try:
+                fin = datetime.strptime(fin_str, "%d/%m/%Y") if fin_str else None
+            except ValueError:
+                fin = None
+
+            if debut and dt_engagement < debut:
+                continue
+            if fin and dt_engagement > fin:
+                continue
+            # Ligne applicable à cette date (ou dates non renseignées -> on la garde par prudence)
+            matches.append(row)
+
+        if not matches:
+            # Aucune version ne couvre cette date -> fallback toutes versions + alerte
+            text = self._read_csv_filtered(filename, fiche)
+            return {"text": text or "", "versions_matched": [], "ambiguous": False, "no_date": False}
+
+        if len(matches) == 1:
+            row = matches[0]
+            text = ";".join(str(v) for v in row.values())
+            return {
+                "text": text, "versions_matched": [row.get("FICHE", "")],
+                "ambiguous": False, "no_date": False,
+            }
+
+        # Plusieurs versions couvrent la même date (chevauchement de périodes) :
+        # on retient la version au DEBUT D'APPLICATION le plus récent (la plus à
+        # jour), mais on renvoie TOUTES les versions concurrentes + flag ambiguous
+        # pour que l'audit final signale explicitement le choix à l'utilisateur.
+        def _debut_key(row):
+            try:
+                return datetime.strptime(row.get("DEBUT D'APPLICATION (Date d'engagement)", ""), "%d/%m/%Y")
+            except (ValueError, TypeError):
+                return datetime.min
+
+        matches_sorted = sorted(matches, key=_debut_key, reverse=True)
+        text = "\n".join(";".join(str(v) for v in row.values()) for row in matches_sorted)
+        return {
+            "text": text,
+            "versions_matched": [row.get("FICHE", "") for row in matches_sorted],
+            "ambiguous": True,
+            "no_date": False,
+        }
