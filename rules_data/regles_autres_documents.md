@@ -13,6 +13,12 @@ La demande de VISA permet d'extraire les éléments suivants d'un dossier ODICEE
 7. **Fiches à valoriser**
 
 > ⚠️ La fiche mentionnée sur le VISA est déclarative : elle doit être vérifiée contre la nature réelle des travaux. En cas d'incohérence, la fiche correspondant aux travaux réels prime et l'écart doit être signalé.
+>
+> **RÈGLE PERMANENTE — Ne JAMAIS signaler comme anomalie, sur AUCUN dossier** : sur le modèle de VISA utilisé, la mention "opération standardisée BAR-TH-130" est un **libellé fixe imprimé à côté de la case "Construction d'un bâtiment neuf"** — ce n'est PAS une fiche déclarée pour le dossier. Elle apparaît systématiquement sur le formulaire, que la case "neuf" soit cochée ou non.
+>
+> **Application obligatoire, pour tous les VISA sans exception** : si c'est la case **"Bâtiment existant depuis plus de 2 ans"** qui est cochée (et non "Construction d'un bâtiment neuf"), la mention BAR-TH-130 doit être **totalement ignorée** — ne pas la comparer à la fiche réelle des travaux, ne pas la citer comme incohérence, ne pas la mentionner dans l'analyse. Elle est dépourvue de sens dans ce cas et ne doit jamais donner lieu à une remarque, quel que soit le dossier analysé.
+>
+> Ne comparer la fiche du VISA à la nature réelle des travaux que dans le cas où la case **"Construction d'un bâtiment neuf"** est elle-même cochée — c'est alors, et alors seulement, que BAR-TH-130 (ou toute autre fiche neuf) devient une déclaration réelle à vérifier.
 
 ---
 
