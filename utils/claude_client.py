@@ -1,12 +1,13 @@
 """
-Client API Claude pour l'analyse CEE — avec prompt caching.
+Client API Claude pour l'analyse CEE — avec prompt caching + mode dry-run.
 
 Architecture du prompt :
   [system + socle de règles MD]  ← bloc STABLE, marqué cache_control
   [fiche filtrée + docs dossier] ← bloc VARIABLE
 
-Le socle (~7k tokens) est mis en cache par Anthropic : à partir du 2e appel
-dans les 5 minutes, il est facturé à 10% du prix input (0,30$/M au lieu de 3$/M).
+Mode dry-run : assemble le prompt complet SANS appeler l'API.
+Permet de vérifier gratuitement que l'extraction, la classification et le
+chargement des règles fonctionnent avant de payer un vrai appel.
 """
 
 import os
@@ -36,11 +37,15 @@ Pour chaque point de contrôle :
 - La fiche mentionnée sur le VISA est déclarative : vérifie qu'elle correspond
   à la nature réelle des travaux. En cas d'écart, signale-le comme anomalie.
 - Une preuve de réalisation doit être un document FINAL (solde, DGD, facture
-  finale). Les situations/acomptes partiels ne sont PAS conformes.
+  finale). Les situations/acomptes partiels ne sont PAS conformes, sauf
+  situation de solde à 100% identifiable comme dernier document du marché.
 - Distingue PRGE et RGE complet sur les certificats Qualifelec.
-- Le délai engagement → réalisation ne doit pas dépasser 12 mois.
+- Le délai engagement → réalisation ne doit pas dépasser 12 mois (alerte non
+  bloquante dès 10 mois).
+- Les éléments techniques de l'engagement ne valident jamais l'éligibilité
+  technique, SAUF un devis dans un montage "devis + PV de réception".
 
-# FORMAT DE RÉPONSE OBLIGATOIRE (structure de la règle de validation)
+# FORMAT DE RÉPONSE OBLIGATOIRE
 ## FICHE APPLICABLE
 [Fiche + justification]
 
@@ -62,35 +67,16 @@ VALIDE / NON VALIDE / INCOMPLET
 """.strip()
 
 
-def analyze_with_claude(
+def build_prompt(
     docs: Dict[str, dict],
-    rules_bundle: Dict[str, str] = None,
-    classification: Dict[str, Any] = None,
-    core_rules_text: str = None,
-    variable_rules_text: str = None,
-    verbose: bool = False,
-    model: str = "claude-sonnet-4-6",
-    max_tokens: int = 3000,
+    core_rules_text: str,
+    variable_rules_text: str,
+    classification: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Appelle l'API Claude avec prompt caching sur le socle de règles.
-
-    Deux modes d'appel :
-    - Nouveau (recommandé) : core_rules_text + variable_rules_text
-    - Legacy : rules_bundle (dict) — reconstruit les deux blocs
+    Assemble le prompt complet (system + user) sans appeler l'API.
+    Utilisé à la fois par analyze_with_claude() et par le mode dry-run.
     """
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    classification = classification or {}
-
-    # Reconstruction legacy si nécessaire
-    if core_rules_text is None and rules_bundle:
-        core_parts, var_parts = [], []
-        for label, content in rules_bundle.items():
-            block = f"--- {label.split(':', 1)[-1]} ---\n{content}"
-            (core_parts if label.startswith("CORE:") else var_parts).append(block)
-        core_rules_text = "\n\n".join(core_parts)
-        variable_rules_text = "\n\n".join(var_parts)
-
     docs_text = _build_docs_section(docs)
 
     context_info = f"""# CONTEXTE PRÉ-ANALYSÉ (à vérifier et corriger si besoin)
@@ -100,30 +86,109 @@ def analyze_with_claude(
 - Coup de pouce : {'Oui' if classification.get('coup_de_pouce') else 'Non'}
 - Sous-traitance : {'Oui' if classification.get('sous_traitance') else 'Non'}"""
 
-    # --- Prompt avec caching ---
-    # Bloc 1 (system) : instructions — stable
-    # Bloc 2 (user, cache_control) : socle de règles MD — stable
-    # Bloc 3 (user) : fiche filtrée + contexte + documents — variable
+    core_block = "# RÈGLES MÉTIER CEE (SOCLE)\n\n" + (core_rules_text or "")
+    variable_block = (
+        "# RÈGLES SPÉCIFIQUES À LA FICHE\n\n"
+        + (variable_rules_text or "(aucune)")
+        + "\n\n" + context_info
+        + "\n\n" + docs_text
+        + "\n\nProcède à l'audit complet selon le format imposé."
+    )
+
+    return {
+        "system": _SYSTEM_INSTRUCTIONS,
+        "core_block": core_block,
+        "variable_block": variable_block,
+    }
+
+
+def dry_run(
+    docs: Dict[str, dict],
+    core_rules_text: str,
+    variable_rules_text: str,
+    classification: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Assemble le prompt SANS appeler l'API. Gratuit.
+    Retourne le prompt complet + une estimation de tokens et de coût.
+    """
+    prompt = build_prompt(docs, core_rules_text, variable_rules_text, classification)
+
+    system_chars = len(prompt["system"])
+    core_chars = len(prompt["core_block"])
+    var_chars = len(prompt["variable_block"])
+
+    system_tk = system_chars // 4
+    core_tk = core_chars // 4
+    var_tk = var_chars // 4
+    total_input_tk = system_tk + core_tk + var_tk
+
+    # Estimation coût — 1er appel (cache write) vs appels suivants (cache read)
+    cost_first_usd = (total_input_tk * 3) / 1_000_000
+    cost_cached_usd = ((system_tk + core_tk) * 0.3 + var_tk * 3) / 1_000_000
+    # + estimation output ~2000 tk
+    output_tk_est = 2000
+    cost_first_usd += (output_tk_est * 15) / 1_000_000
+    cost_cached_usd += (output_tk_est * 15) / 1_000_000
+
+    return {
+        "prompt_system": prompt["system"],
+        "prompt_core": prompt["core_block"],
+        "prompt_variable": prompt["variable_block"],
+        "tokens_estimation": {
+            "system": system_tk,
+            "core_socle": core_tk,
+            "variable": var_tk,
+            "total_input": total_input_tk,
+            "output_estime": output_tk_est,
+        },
+        "cout_estime_eur": {
+            "premier_appel": round(cost_first_usd * 0.92, 4),
+            "appels_suivants_avec_cache": round(cost_cached_usd * 0.92, 4),
+        },
+        "mode": "dry_run",
+    }
+
+
+def analyze_with_claude(
+    docs: Dict[str, dict],
+    rules_bundle: Dict[str, str] = None,
+    classification: Dict[str, Any] = None,
+    core_rules_text: str = None,
+    variable_rules_text: str = None,
+    verbose: bool = False,
+    model: str = "claude-sonnet-4-6",
+    max_tokens: int = 3000,
+    api_key: str = None,
+) -> Dict[str, Any]:
+    """Appelle l'API Claude avec prompt caching sur le socle de règles."""
+    client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
+    classification = classification or {}
+
+    if core_rules_text is None and rules_bundle:
+        core_parts, var_parts = [], []
+        for label, content in rules_bundle.items():
+            block = f"--- {label.split(':', 1)[-1]} ---\n{content}"
+            (core_parts if label.startswith("CORE:") else var_parts).append(block)
+        core_rules_text = "\n\n".join(core_parts)
+        variable_rules_text = "\n\n".join(var_parts)
+
+    prompt = build_prompt(docs, core_rules_text, variable_rules_text, classification)
+
     user_content = [
         {
             "type": "text",
-            "text": "# RÈGLES MÉTIER CEE (SOCLE)\n\n" + (core_rules_text or ""),
+            "text": prompt["core_block"],
             "cache_control": {"type": "ephemeral"},
         },
         {
             "type": "text",
-            "text": (
-                "# RÈGLES SPÉCIFIQUES À LA FICHE\n\n"
-                + (variable_rules_text or "(aucune)")
-                + "\n\n" + context_info
-                + "\n\n" + docs_text
-                + "\n\nProcède à l'audit complet selon le format imposé."
-            ),
+            "text": prompt["variable_block"],
         },
     ]
 
     if verbose:
-        est = (len(_SYSTEM_INSTRUCTIONS) + sum(len(b["text"]) for b in user_content)) // 4
+        est = (len(prompt["system"]) + len(prompt["core_block"]) + len(prompt["variable_block"])) // 4
         print(f"   → Estimation tokens envoyés : ~{est:,}")
 
     for attempt in range(3):
@@ -133,7 +198,7 @@ def analyze_with_claude(
                 max_tokens=max_tokens,
                 system=[{
                     "type": "text",
-                    "text": _SYSTEM_INSTRUCTIONS,
+                    "text": prompt["system"],
                     "cache_control": {"type": "ephemeral"},
                 }],
                 messages=[{"role": "user", "content": user_content}],

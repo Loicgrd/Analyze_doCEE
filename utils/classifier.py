@@ -2,79 +2,116 @@
 Classifier de dossier CEE.
 Détecte la fiche BAR/BAT, le secteur et le coup de pouce.
 
-Deux modes disponibles :
-- Mode REGEX (rapide, gratuit, ~90% fiable) : classify_dossier()
-- Mode IA   (fiable, ~0.001€/dossier)       : classify_dossier_ia()
+Trois modes disponibles :
+- REGEX (rapide, gratuit, ~90% fiable SI le code fiche est écrit explicitement)
+- IA (classify_dossier_ia) : reconnaissance sémantique de la nature des travaux
+  à partir de la table officielle fiche<->travaux, quand aucun code n'est
+  explicitement mentionné. Utilise Sonnet par défaut (meilleure reconnaissance
+  que Haiku sur ce type de lecture de facture/devis).
+- MANUEL : fiche imposée directement par l'utilisateur (voir analyzer.py --fiche
+  ou le sélecteur dans app.py) — à privilégier quand le classifier échoue ou
+  pour un contrôle total.
 
-Recommandation : utiliser classify_dossier_ia() en production.
-Le mode regex peut servir de fallback si l'API est indisponible.
+classify_dossier() bascule automatiquement selon la présence de la clé API.
 """
 
 import os
 import re
 import json
-import anthropic
 from typing import Dict, Optional
 
 
-# ---------------------------------------------------------------------------
-# MODE IA — Classification par Haiku 4.5 (recommandé)
-# ---------------------------------------------------------------------------
+def _build_classifier_system(correspondance_table: str = "") -> str:
+    table_block = ""
+    if correspondance_table:
+        table_block = f"""
+# NOMENCLATURE OFFICIELLE DES FICHES (à utiliser en priorité)
+Voici la table officielle des fiches BAR/BAT avec leur libellé de travaux.
+Base-toi sur CETTE liste pour associer les travaux décrits dans les documents
+à un code fiche — n'invente jamais un code qui n'y figure pas.
 
-_CLASSIFIER_SYSTEM = """
-Tu es un expert CEE. On te donne des extraits de documents d'un dossier de travaux.
-Tu dois identifier la fiche BAR ou BAT applicable, le secteur et le contexte.
+{correspondance_table}
+"""
 
+    return f"""
+Tu es un expert CEE. On te donne des extraits de documents d'un dossier de travaux
+(facture, devis, DGD, ordre de service...).
+
+Ta mission : identifier la fiche BAR ou BAT applicable en te basant sur :
+1. Un code fiche explicitement écrit dans les documents (ex: "BAR-EN-105") si présent
+2. À défaut, la **nature réelle des travaux décrits** (matériaux, épaisseurs,
+   équipements, prestations facturées) mise en correspondance avec la
+   nomenclature officielle ci-dessous — c'est le cas le plus fréquent, les
+   documents mentionnent rarement le code fiche explicitement.
+{table_block}
 Réponds UNIQUEMENT en JSON valide, sans texte avant ou après, avec exactement ces clés :
-{
+{{
   "fiche": "BAR-EN-105",
   "secteur": "BAR",
   "coup_de_pouce": false,
   "type_engagement": "ordre_de_service",
   "sous_traitance": false,
   "confiance": "haute",
-  "raisonnement": "explication courte"
-}
+  "raisonnement": "explication courte citant les éléments des documents qui ont motivé ce choix"
+}}
 
 Valeurs possibles :
-- fiche : code exact (ex: BAR-EN-101, BAR-TH-129, BAT-EN-102...) ou "INCONNUE"
+- fiche : code exact présent dans la nomenclature fournie, ou "INCONNUE" si aucune
+  correspondance raisonnable n'est identifiable
 - secteur : "BAR" (résidentiel) ou "BAT" (tertiaire)
 - coup_de_pouce : true/false
 - type_engagement : "ordre_de_service" | "bon_de_commande" | "acte_engagement" | "devis" | "inconnu"
 - sous_traitance : true si un sous-traitant est mentionné
-- confiance : "haute" | "moyenne" | "faible"
-- raisonnement : 1 phrase expliquant le choix de la fiche
+- confiance : "haute" (code explicite ou nature des travaux sans ambiguïté) |
+  "moyenne" (déduit de la nature des travaux, quelques incertitudes) |
+  "faible" (peu d'éléments techniques exploitables)
+- raisonnement : 1-2 phrases, cite les éléments concrets des documents (matériau,
+  épaisseur, équipement...) qui justifient le choix de fiche
 
 RÈGLE IMPORTANTE : si plusieurs fiches sont mentionnées dans les documents,
 privilégie celle qui correspond réellement aux travaux décrits (nature des travaux,
-matériaux, équipements), pas nécessairement celle écrite dans un formulaire.
-Ex: si le VISA dit BAR-TH-130 mais que les travaux sont de l'isolation toiture
-terrasse sur bâtiment existant, la bonne fiche est BAR-EN-105.
+matériaux, équipements), pas nécessairement celle écrite dans un formulaire
+déclaratif type VISA. Ex: si le VISA dit BAR-TH-130 mais que les travaux sont de
+l'isolation toiture terrasse sur bâtiment existant, la bonne fiche est BAR-EN-105.
 """.strip()
 
 
 def classify_dossier_ia(
     docs: Dict[str, dict],
-    model: str = "claude-haiku-4-5-20251001",
+    model: str = "claude-sonnet-4-6",
+    correspondance_table: str = "",
+    max_chars_per_doc: int = 2500,
 ) -> Dict:
     """
-    Classification fiable via Haiku 4.5.
-    Coût : ~0.001€ par dossier. Temps : ~1-2s.
+    Classification par IA — reconnaissance sémantique de la nature des travaux.
+
+    Utilise Sonnet par défaut : la tâche (repérer un panneau isolant au milieu
+    d'une facture multi-lignes, distinguer les prestations) demande davantage
+    de raisonnement qu'une simple extraction, Sonnet est nettement plus fiable
+    que Haiku sur ce type de lecture.
+
+    Coût : ~0.01-0.02€ par dossier (vs ~0.001€ en Haiku) — reste marginal
+    face au coût de l'analyse complète (~0.05€), pour un gain de fiabilité
+    important quand le code fiche n'est pas écrit explicitement.
 
     Args:
         docs: dict {nom_fichier: {"text": str, "scanned": bool}}
-        model: modèle à utiliser (Haiku par défaut)
+        model: modèle à utiliser (Sonnet par défaut)
+        correspondance_table: table fiche<->travaux (depuis RuleLoader), fortement
+            recommandée pour éviter les hallucinations de code fiche
+        max_chars_per_doc: extrait par document (plus large qu'avant pour capter
+            les lignes techniques qui ne sont pas forcément en tête de document)
 
     Returns:
         dict avec fiche, secteur, coup_de_pouce, type_engagement,
               sous_traitance, confiance, raisonnement
     """
-    # Construire un extrait court et représentatif de chaque document
+    import anthropic
+
     extraits = []
     for name, doc in docs.items():
         text = doc.get("text", "")
-        # On prend les 800 premiers caractères — suffisant pour la classification
-        extrait = text[:800].replace("\n", " ").strip()
+        extrait = text[:max_chars_per_doc].strip()
         if extrait:
             extraits.append(f"[{name.upper()}]\n{extrait}")
 
@@ -88,23 +125,20 @@ def classify_dossier_ia(
     )
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    system_prompt = _build_classifier_system(correspondance_table)
 
     try:
         response = client.messages.create(
             model=model,
-            max_tokens=300,
-            system=_CLASSIFIER_SYSTEM,
+            max_tokens=400,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
         raw = response.content[0].text.strip()
-
-        # Nettoyage robuste du JSON (parfois Haiku ajoute des backticks)
         raw = re.sub(r"^```json\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-
         result = json.loads(raw)
 
-        # Garantir toutes les clés attendues
         result.setdefault("fiche", "INCONNUE")
         result.setdefault("secteur", "BAR")
         result.setdefault("coup_de_pouce", False)
@@ -112,20 +146,14 @@ def classify_dossier_ia(
         result.setdefault("sous_traitance", False)
         result.setdefault("confiance", "moyenne")
         result.setdefault("raisonnement", "")
-
         return result
 
-    except (json.JSONDecodeError, Exception) as e:
-        # Fallback regex si Haiku échoue
+    except Exception as e:
         fallback = classify_dossier_regex(docs)
         fallback["confiance"] = "faible"
         fallback["raisonnement"] = f"Fallback regex (erreur IA: {e})"
         return fallback
 
-
-# ---------------------------------------------------------------------------
-# MODE REGEX — Fallback rapide sans appel API
-# ---------------------------------------------------------------------------
 
 FICHE_PATTERNS = [
     (r"BAR-EN-101", "BAR-EN-101"), (r"BAR-EN-102", "BAR-EN-102"),
@@ -173,10 +201,8 @@ KEYWORD_TO_FICHE = {
 
 
 def classify_dossier_regex(docs: Dict[str, dict]) -> Dict:
-    """
-    Classification par regex — rapide mais moins fiable.
-    Utiliser comme fallback uniquement.
-    """
+    """Classification par regex — ne fonctionne que si le code fiche est écrit
+    explicitement ou qu'un mot-clé générique évident est présent. Fallback uniquement."""
     full_text = " ".join(d.get("text", "") for d in docs.values())
     full_text_lower = full_text.lower()
 
@@ -203,21 +229,49 @@ def classify_dossier_regex(docs: Dict[str, dict]) -> Dict:
         "type_engagement": _detect_engagement_type(full_text_lower),
         "sous_traitance": any(k in full_text_lower for k in ["sous-traitant", "dc4"]),
         "confiance": "moyenne",
-        "raisonnement": "Classification par regex (sans IA)",
+        "raisonnement": "Classification par regex (sans IA) — fiable seulement si le code "
+                         "fiche ou un mot-clé générique est explicitement écrit",
     }
 
 
-def classify_dossier(docs: Dict[str, dict]) -> Dict:
+def classify_dossier(docs: Dict[str, dict], correspondance_table: str = "") -> Dict:
     """
     Point d'entrée principal.
-    Tente la classification IA (Haiku), bascule en regex si l'API est indisponible.
+
+    Stratégie : essaye d'abord le regex (gratuit, instantané). S'il trouve un
+    code fiche explicite, on le garde tel quel (haute confiance, aucun coût).
+    Sinon, bascule sur la classification IA (Sonnet) qui raisonne sur la
+    nature des travaux avec la nomenclature officielle — c'est le cas le plus
+    fréquent en pratique, la plupart des documents ne citent pas le code fiche.
+
+    Args:
+        correspondance_table: table fiche<->travaux, à passer depuis
+            RuleLoader.get_fiche_correspondance_table() pour de meilleurs
+            résultats en mode IA.
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+    regex_result = classify_dossier_regex(docs)
+    if regex_result["fiche"] != "INCONNUE" and regex_result["fiche"] in _known_fiches_from_patterns():
+        # Code fiche trouvé explicitement dans le texte -> fiable, pas besoin d'IA
+        regex_result["confiance"] = "haute"
+        regex_result["raisonnement"] = "Code fiche trouvé explicitement dans les documents"
+        return regex_result
+
     if not api_key:
-        result = classify_dossier_regex(docs)
-        result["raisonnement"] = "ANTHROPIC_API_KEY absent — fallback regex"
-        return result
-    return classify_dossier_ia(docs)
+        regex_result["raisonnement"] = (
+            "ANTHROPIC_API_KEY absent — fallback regex uniquement. "
+            "La nature des travaux n'a pas pu être analysée sémantiquement : "
+            "si aucun code fiche n'était écrit explicitement, ce résultat peut "
+            "être peu fiable. Envisager --fiche pour l'indiquer manuellement."
+        )
+        return regex_result
+
+    return classify_dossier_ia(docs, correspondance_table=correspondance_table)
+
+
+def _known_fiches_from_patterns() -> set:
+    return {name for _, name in FICHE_PATTERNS}
 
 
 def _detect_engagement_type(text_lower: str) -> str:
