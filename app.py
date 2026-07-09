@@ -135,11 +135,16 @@ with col_fiche:
     )
     fiche_manuelle = None
     if fiche_mode == "Manuelle":
-        fiche_manuelle = st.text_input(
-            "Code fiche",
-            placeholder="ex: BAR-EN-105",
-            help="Code exact tel qu'il apparaît dans vos CSV Fiche Récapitulatif",
-        ).strip().upper() or None
+        fiche_manuelle_raw = st.text_input(
+            "Code(s) fiche",
+            placeholder="ex: BAR-EN-105 ou BAR-TH-106,BAR-TH-127 pour un dossier multi-fiches",
+            help="Un code, ou plusieurs séparés par des virgules si le dossier couvre "
+                 "plusieurs types de travaux (ex: un lot chauffage+ventilation).",
+        ).strip().upper()
+        fiche_manuelle = (
+            [f.strip() for f in fiche_manuelle_raw.split(",") if f.strip()]
+            if fiche_manuelle_raw else None
+        )
 
 if uploaded:
     st.divider()
@@ -202,28 +207,32 @@ if uploaded:
                 status.update(label="🔎 Classification du dossier…")
                 if fiche_manuelle:
                     # Contournement total : on ne fait tourner le classifier que pour
-                    # récupérer secteur/type d'engagement, la fiche est imposée.
+                    # récupérer secteur/type d'engagement, la ou les fiches sont imposées.
                     if dry_run_mode and not api_key:
                         classification = classify_dossier_regex(docs)
                     else:
                         classification = classify_dossier(docs, correspondance_table=correspondance_table)
-                    classification["fiche"] = fiche_manuelle
-                    classification["secteur"] = "BAT" if fiche_manuelle.startswith("BAT") else "BAR"
+                    classification["fiches"] = fiche_manuelle
+                    classification["secteur"] = "BAT" if fiche_manuelle[0].startswith("BAT") else "BAR"
                     classification["confiance"] = "haute"
-                    classification["raisonnement"] = "Fiche indiquée manuellement par l'utilisateur"
-                    st.write(f"→ Fiche imposée manuellement : **{fiche_manuelle}**")
+                    classification["raisonnement"] = "Fiche(s) indiquée(s) manuellement par l'utilisateur"
+                    st.write(f"→ Fiche(s) imposée(s) manuellement : **{', '.join(fiche_manuelle)}**")
                 elif dry_run_mode and not api_key:
                     classification = classify_dossier_regex(docs)
-                    st.write(f"→ Fiche détectée (regex, sans IA) : **{classification['fiche']}** "
+                    fiches_d = classification.get("fiches", ["INCONNUE"])
+                    st.write(f"→ Fiche(s) détectée(s) (regex, sans IA) : **{', '.join(fiches_d)}** "
                              f"(confiance : {classification.get('confiance', '?')})")
                 else:
                     classification = classify_dossier(docs, correspondance_table=correspondance_table)
-                    st.write(f"→ Fiche détectée : **{classification['fiche']}** "
+                    fiches_d = classification.get("fiches", ["INCONNUE"])
+                    st.write(f"→ Fiche(s) détectée(s) : **{', '.join(fiches_d)}** "
                              f"(confiance : {classification.get('confiance', '?')})")
+                    if len(fiches_d) > 1:
+                        st.info(f"ℹ️ Dossier multi-fiches détecté ({len(fiches_d)} fiches)", icon="ℹ️")
                     if classification.get("raisonnement"):
                         st.caption(f"_{classification['raisonnement']}_")
 
-                if classification['fiche'] == "INCONNUE":
+                if classification.get("fiches", ["INCONNUE"]) == ["INCONNUE"]:
                     st.warning(
                         "⚠️ Aucune fiche BAR/BAT identifiée. Vérifiez si le VISA ou un "
                         "document listant la fiche est bien inclus dans le ZIP, ou "
@@ -320,7 +329,7 @@ if uploaded:
                 st.markdown(f'<div class="{css_class}">{icon} {statut}</div>', unsafe_allow_html=True)
 
             with col2:
-                fiche = classification.get("fiche", "?")
+                fiche = ", ".join(classification.get("fiches", [classification.get("fiche", "?")]))
                 confiance = classification.get("confiance", "?")
                 st.markdown(
                     f'<span class="info-pill">📋 {fiche}</span>'
