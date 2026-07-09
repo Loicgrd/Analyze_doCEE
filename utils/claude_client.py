@@ -16,6 +16,8 @@ from typing import Dict, Any
 
 import anthropic
 
+from utils.extractor import smart_truncate
+
 
 _SYSTEM_INSTRUCTIONS = """
 Tu es un Expert Auditeur Senior en Certificats d'Économies d'Énergie (CEE),
@@ -260,8 +262,11 @@ def _build_docs_section(docs: Dict[str, dict]) -> str:
     for name, doc in docs.items():
         scanned = " [SCANNÉ - OCR]" if doc.get("scanned") else ""
         text = doc.get("text", "")
-        if len(text) > 8000:
-            text = text[:4000] + "\n\n[... tronqué ...]\n\n" + text[-4000:]
+        # smart_truncate préserve chaque section de fiche détectée (utile pour
+        # les documents multi-fiches comme une AH à plusieurs parties A) au
+        # lieu d'une troncature naïve tête+queue qui risquerait d'en effacer
+        # une entièrement si elle se trouve au milieu d'un document long.
+        text = smart_truncate(text, max_chars=10000)
         parts.append(f"\n--- {name.upper()}{scanned} ---\n{text}")
     return "\n".join(parts)
 
