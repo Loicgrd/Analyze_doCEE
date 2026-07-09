@@ -1,0 +1,35 @@
+{
+  "_description": "Jeu d'évaluation : verdicts attendus par dossier. Remplir 'attendu' pour chaque ZIP placé dans eval/dossiers/",
+  "dossiers": [
+    {
+      "fichier": "T185261.zip",
+      "attendu": {
+        "fiche": "A_COMPLETER (ex: BAR-EN-101)",
+        "statut": "A_COMPLETER (VALIDE | NON VALIDE | INCOMPLET)",
+        "points_bloquants_attendus": [
+          "Exemple : OS non signé par le MOA",
+          "Exemple : facture = situation partielle, pas de solde"
+        ],
+        "commentaire": "Notes libres de l'instructeur"
+      }
+    },
+    {
+      "fichier": "T266163.zip",
+      "attendu": {
+        "fiche": "A_COMPLETER",
+        "statut": "A_COMPLETER",
+        "points_bloquants_attendus": [],
+        "commentaire": ""
+      }
+    },
+    {
+      "fichier": "T128246.zip",
+      "attendu": {
+        "fiche": "A_COMPLETER",
+        "statut": "A_COMPLETER",
+        "points_bloquants_attendus": [],
+        "commentaire": ""
+      }
+    }
+  ]
+}

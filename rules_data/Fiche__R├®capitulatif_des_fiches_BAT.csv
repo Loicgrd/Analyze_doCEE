@@ -1,0 +1,497 @@
+FICHE;TRAVAUX;Favoris;DEBUT D'APPLICATION (Date d'engagement);FIN D'APPLICATION (Date d'engagement);CONDITIONS TECHNIQUES D'ELIGIBILITE AUX CEE;DOCUMENTS COMPLEMENTAIRES;MENTIONS OBLIGATOIRES SUR LA PREUVE DE REALISATION;CONDITIONS SUPPLEMENTAIRES POUR LE COUP DE POUCE;QUALIFICATION DU PROFESSIONNEL;MENTIONS POUR COMPLETER L'AH;"ELIGIBILITE AUX CONTROLES
+(Date d'engagement)";INCOMPATIBILITE AUTRES FICHES;"EXEMPLES DE VALEURS (SIMULATION)
+Valeurs moyennes pour simulation";BAT-EN-101 A33.3;Isolation de combles ou de toitures (France métropolitaine);;01/09/2020;31/12/2024;"R (Résistance thermique) ≥ 6 en rampant de toiture
+Délai de 7 jours entre la signature du devis et le début des travaux.";;"Surface d'isolant (m?)
+Résistance thermique installée (m?.K/W)
+Les aménagements nécessaires à la mise en place de l’isolation (coffrage ou écran de protection autour des conduits de fumées et des dispositifs d’éclairage encastrés ; rehausse rigide au-dessus de la trappe d’accès ; pare-vapeur ou tout autre dispositif équivalent lorsqu'il est nécessaire de protéger les matériaux d'isolation thermique contre les transferts d'humidité pour garantir la performance de l'ouvrage)";;;"Secteur d'activité
+date de pose
+Surface isolant
+Resistance thermique
+Epaisseur
+Marque et référence
+Pose d'un pare-vapeur
+Energie de chauffage";Oui;;;BAT-EN-101 A64.4;Isolation de combles ou de toitures (France métropolitaine);;01/01/2025;31/06/2027;"R (Résistance thermique) ≥ 6 en rampant de toiture
+Délai de 7 jours entre la signature du devis et le début des travaux.";;"Surface d'isolant (m?)
+Résistance thermique installée (m?.K/W)
+Les aménagements nécessaires à la mise en place de l’isolation (coffrage ou écran de protection autour des conduits de fumées et des dispositifs d’éclairage encastrés ; rehausse rigide au-dessus de la trappe d’accès ; pare-vapeur ou tout autre dispositif équivalent lorsqu'il est nécessaire de protéger les matériaux d'isolation thermique contre les transferts d'humidité pour garantir la performance de l'ouvrage)";;;"Secteur d'activité
+date de pose
+Surface isolant
+Resistance thermique
+Epaisseur
+Marque et référence
+Pose d'un pare-vapeur
+Energie de chauffage";Oui;;;BAT-EN-102 A27.2;Isolation des murs (France métropolitaine);;01/04/2018;31/12/2024;R (Résistance thermique) ≥ 3,7;;"Surface d'isolant (m?)
+Résistance thermique installée (m?.K/W)
+";;;"Secteur d'activité
+Surface isolant
+Resistance thermique
+Epaisseur
+Marque et référence
+Energie de chauffage";Oui;;;BAT-EN-102 A27.2;Isolation des murs (France métropolitaine);;01/01/2025;31/06/2027;R (Résistance thermique) ≥ 3,7;;"Surface d'isolant (m?)
+Résistance thermique installée (m?.K/W)
+";;;"Secteur d'activité
+Surface isolant
+Resistance thermique
+Epaisseur
+Marque et référence
+Energie de chauffage";Oui;;;BAT-EN-103 A33.3;Isolation d'un plancher;;01/09/2020;31/12/2024;"R (Résistance thermique) ≥ 3 
+Délai de 7 jours entre la signature du devis et le début des travaux.";;"Surface d'isolant (m?)
+Résistance thermique installée (m?.K/W)
+Les aménagements nécessaires à la mise en place de l’isolation (coffrage ou écran de protection autour des conduits de fumées et des dispositifs d’éclairage encastrés ; rehausse rigide au-dessus de la trappe d’accès ; pare-vapeur ou tout autre dispositif équivalent lorsqu'il est nécessaire de protéger les matériaux d'isolation thermique contre les transferts d'humidité pour garantir la performance de l'ouvrage)";;;"Secteur d'activité
+Surface isolant
+Resistance thermique
+Epaisseur
+Marque et référence
+pose d'un pare-vapeur
+Energie de chauffage";Oui;;;BAT-EN-103 A33.3;Isolation d'un plancher;;01/01/2025;31/06/2027;"R (Résistance thermique) ≥ 3 
+Délai de 7 jours entre la signature du devis et le début des travaux.";;"Surface d'isolant (m?)
+Résistance thermique installée (m?.K/W)
+Les aménagements nécessaires à la mise en place de l’isolation (coffrage ou écran de protection autour des conduits de fumées et des dispositifs d’éclairage encastrés ; rehausse rigide au-dessus de la trappe d’accès ; pare-vapeur ou tout autre dispositif équivalent lorsqu'il est nécessaire de protéger les matériaux d'isolation thermique contre les transferts d'humidité pour garantir la performance de l'ouvrage)";;;"Secteur d'activité
+Surface isolant
+Resistance thermique
+Epaisseur
+Marque et référence
+pose d'un pare-vapeur
+Energie de chauffage";Oui;;;BAT-EN-104 A27.2;Fenêtre ou porte-fenêtre complète avec vitrage isolant;;01/04/2018;31/12/2023;"Fenêtres de toiture Uw ≤ 1,5 W/m?.K et Sw ≤ 0,15
+Autres fenêtres ou portes-fenêtres Uw ≤ 1,3 W/m?.K et Sw ≤ 0,35 ";;"Les coefficients Uw et Sw des menuiseries installées
+Surface de menuiseries installées
+
+";;;"Secteur d'activité
+Energie de chauffage
+Type de fenêtre
+Surface de fenêtre
+Uw
+Sw
+Marque et référence";;;;BAT-EN-104 A54.3;Fenêtre ou porte-fenêtre complète avec vitrage isolant;;01/01/2024;30/06/2028;" Fenêtres et porte fenêtres Uw ≤ 1,5 W/m?.K 
+Double fenêtre (fenêtre en plus d'une déjà existante) Uw ≤ 1,8 W/m?.K";;"Les coefficients Uw des menuiseries installées
+Surface de menuiseries installées
+
+";;;"Secteur d'activité
+Energie de chauffage
+Surface de fenêtre
+Uw
+Marque et référence";;;;BAT-EN-107 A27.2;Isolation des toitures-terrasses;;01/04/2018;31/12/2024;R (Résistance thermique) ≥ 4,5;;"Surface d'isolant (m?)
+Résistance thermique installée (m?.K/W)
+";;;"Secteur d'activité
+Surface isolant
+Energie de chauffage
+Resistance thermique
+Epaisseur
+Marque et référence";;;;BAT-EN-107 A27.2;Isolation des toitures-terrasses;;01/01/2025;31/06/2027;R (Résistance thermique) ≥ 4,5;;"Surface d'isolant (m?)
+Résistance thermique installée (m?.K/W)
+";;;"Secteur d'activité
+Surface isolant
+Energie de chauffage
+Resistance thermique
+Epaisseur
+Marque et référence";;;;BAT-EQ-127 A35.3;Luminaires d'éclairage général à modules LED;;01/10/2020;31/03/2022;"durée de vie calculée à 25°C pour une chute de flux lumineux ≤ 20 % : 
+- ≥ 35 000 heures pour les secteurs « Hôtellerie, Restauration » et « Commerces de
+surface inférieure à 400 m? » ;
+- ≥ 50 000 heures pour les secteurs « Bureaux », « Santé », « Enseignement »,
+« Commerces de surface supérieure à 400 m? » et autres secteurs non cités ci-dessus ;
+
+- flux lumineux initial total sortant du luminaire ≥ 3 000 lm ;
+- efficacité lumineuse (flux lumineux total sortant du luminaire divisé par la puissance totale du luminaire auxiliaire d'alimentation compris) :
+- ≥ 90 lumens par watt pour les luminaires avec indice de protection aux chocs (IK) égal à 10 ;
+- ≥ 120 lumens par watt pour les autres luminaires ;
+- facteur de puissance > 0,9 quelle que soit la puissance ;
+- conformité à la norme EN 61000-3-2 au niveau harmonique avec un taux de distorsion harmonique sur le courant inférieur à 25 % ;
+- groupe de risque strictement inférieur à « 2 » selon la norme NF EN 60598-1 Luminaires - Partie 1 : exigences générales et essais ;
+- le luminaire est pré-équipé pour la régulation automatique par gradation de puissance en fonction de l’éclairage naturel du local dès lors que cet éclairage est possible
+
+le professionnel réalise une étude préalable de l'éclairage";"étude de dimensionnement préalable du professionnel : état des lieux, besoins, caractéristiques, nombre et implantations des nouveaux luminaires, puissance installée par m? de surface utile éclairée et calcul les économies d'énergies attendues.
+
+Certificat RGE du professionnel";"Nombre de  luminaires LED installés
+puissance
+durée de vie à 25°C et chute du flux à l'issue de la durée de vie
+efficacité lumineuse
+indice de protection IK si l’efficacité lumineuse est inférieure à 120 lm/W 
+facteur de puissance,
+taux de distorsion harmonique
+leur flux lumineux initial total,
+le groupe de risque ""0"" ou ""1""
+type de régulation pré-équipé";;"RGE ""étude"" dans le domaine de l'éclairage";"Secteur d'activité
+Marque et référence
+Puissance unitaire (W)
+Nombre
+Puissance totale (W)
+durée de vie à 25°C et chute du flux à l'issue de la durée de vie
+efficacité lumineuse
+indice de protection IK si l’efficacité lumineuse est inférieure à 120 lm/W 
+facteur de puissance,
+taux de distorsion harmonique
+leur flux lumineux initial total,
+le groupe de risque ""0"" ou ""1""
+régulation pré-équipé (Oui ou Non)";;;;"BAT-EQ-127 A40.4
+NON ELIGIBLE SI NON LISTEE AU PNCEE LE 06/03/2026";Luminaires d'éclairage général à modules LED;;01/04/2022;24/02/2026;"- durée de vie calculée à 25°C supérieure ou égale à 50 000 heures pour une chute de flux lumineux inférieure ou égale à 20 % conformément à la norme EN 62722-2-1 et à la méthode d'extrapolation TM21 ;
+- efficacité lumineuse (flux lumineux total sortant du luminaire divisé par la puissance totale du luminaire auxiliaire d'alimentation compris) :
+- supérieure ou égale à 120 lumens par watt pour les luminaires ayant un indice de protection aux chocs (IK) supérieur ou égal à 10 selon la norme NF EN 62262 ;
+- supérieure ou égale à 140 lumens par watt pour les autres luminaires ;
+- toutefois, dans le cas où l’indice de rendu des couleurs (IRC) est supérieur ou égal à 90 selon la norme NF EN 62717, avec R9 > 0, l’efficacité lumineuse est supérieure ou égale à :
+- 108 lumens par watt pour les luminaires ayant un indice de protection aux chocs (IK) supérieur ou égal à 10 selon la norme NF EN 62262 ;
+- 126 lumens par watt pour les autres luminaires ;
+- facteur de déphasage supérieur ou égal à 0,9 quelle que soit la puissance selon la norme EN 61000-3-2 ;
+- taux de distorsion harmonique sur le courant inférieur à 25 % selon la norme EN 61000-3-2 ;
+- groupe de risque photobiologique strictement inférieur à « 2 » selon la norme NF EN 60598-1 Luminaires –
+Partie 1 : exigences générales et essais ;
+- le luminaire est adapté pour la régulation automatique par gradation de puissance en fonction de l’éclairage naturel
+du local dès lors que cet éclairage est possible ;
+- le ou les modules LED et leurs appareillages d'alimentation associés sont remplaçables.";"étude de dimensionnement préalable du professionnel : état des lieux, besoins, caractéristiques, nombre et implatations des nouveaux luminaires, puissance installée par m? de surface utile éclairée et calcul les économies d'énergies attendues.
+
+Certificat RGE du professionnel";"Nombre de luminaires installés
+puissance
+durée de vie calculée à 25°C, leur chute de flux lumineux à l’issue deleur durée de vie, 
+efficacité lumineuse (auxiliaire d'alimentation compris), 
+indice de rendu des couleurs (IRC) avec  R9>0,
+indice de protection aux chocs (IK) si l’efficacité lumineuse est inférieure à 140 lm/W,
+facteur de déphasage, 
+taux de distorsion harmonique, 
+groupe de risque photobiologique,
+fait que le luminaire est adapté pour la régulation automatique par gradation de puissance en fonction de l’éclairage naturel du local dès lors que cet éclairage est possible";;"RGE ""étude"" dans le domaine de l'éclairage";"Secteur d'activité
+Marque et référence
+Puissance unitaire (W)
+Nombre
+Puissance totale (W)
+durée de vie à 25°C et chute du flux à l'issue de la durée de vie
+efficacité lumineuse
+facteur de déphasage
+Indice de rendu de couleur IRC
+indice de protection IK si l’efficacité lumineuse est inférieure à 140 lm/W 
+taux de distorsion harmonique (en %),
+leur flux lumineux initial total,
+le groupe de risque ""0"" ou ""1""
+Les modules LED et leurs appareillages d'alimentation sont remplaçables (oui ou non)
+régulation pré-équipé (présence Oui ou Non)";à partir du 01/04/2023 uniquement par contact;;;BAT-TH-102 A28.2;Chaudière collective à haute performance énergétique;;01/01/2019;31/12/2024;"Chaudière à combustible liquide ou gazeux.
+Régulateur de classe ≥ IV
+Puissance ≤ 70 kW : Chaudière ayant une (Efficacité énergétique saisonnière) Etas (%)≥ 90
+Puissance ≤ 400 kW : Efficacité à 100% de charge ≥ 87% et effiacité à 30% de charge  ≥ 95,5%
+Puissance > 400 kW : Rendement PCI à pleine charge et à charge partielle ≥ 92%";;"Nombre de chaudières posées
+Puissance, ETAS/rendement de la chaudière (à 100 et 30% pour puissance sup à 70kW)
+OU
+Marque et référence de la chaudière
+Installatation régulateur et classe
+Rendement ";"""Mise en place d’une chaudière collective à haute performance énergétique utilisant un combustible gazeux en remplacement d'une chaudière au charbon ou au fioul non performante (toute technologie autre que condensation).
+
+L’efficacité énergétique saisonnière des chaudières, dont la puissance thermique nominale est inférieure ou égale à 70 kW, est supérieure ou égale à 92 %.
+
+Attestation du gestionnaire de réseau de chaleur précisant l’impossibilité technique ou économique de raccordement au réseau.
+
+La dépose de l'équipement existant est mentionnée sur la preuve de réalisation indiquant l'énergie de chauffage (charbon, fioul ou gaz) et le type d'équipement. De plus, il est mentionné que la chaudière remplacée n'est pas à condensation, ou à défaut, il est fait mention de la marque et référence de la chaudière remplacée.
+
+Document justifiant qu'il s'agit d'une chaudière autre qu'à condensation (pièce à archiver).""
+";;"Secteur d'activité
+Surface chauffée en m?
+Usage de la chaudière
+Puissance
+classe régulateur
+Marque et référence de la chaudière
+ETAS/rendement de la chaudière";à partir du 01/04/2023 uniquement par contact;;;BAT-TH-104 A32.2;Robinet thermostatique;;01/04/2020;31/07/2025;"Installation des robinets thermostatiques sur radiateurs existants depuis plus de 2 ans.
+Le système central de chauffage à combustible existe lui aussi depuis plus de 2 ans.";;"Nombre de ""robinets thermostatiques"" posés
+";;;"Bâtiment, chaudière, radiateurs existants depuis plus de 2 ans
+Secteur d'activité
+Nombre de robinets thermostatiques installées sur radiateurs
+Marque et référence
+Surface chauffée";;;;BAT-TH-105 A32.2;Radiateur basse température pour un chauffage central;;01/04/2020;;"Les radiateurs sont dimensionnés pour de la ""basse température"" : DT ?nom ≤ 30 K (?nom = débit nom)";;"Nombre de radiateurs installés
+Préciser la mention ""basse température""";;;"Secteur d'activité
+Surface chauffée en m?
+Marque et référence des radiateurs basse température
+Nombre de radiateurs
+chauffé ou non par un système de chauffage central";;;;BAT-TH-109 A31.2;Optimiseur de relance en chauffage collectif comprenant une fonction auto-adaptative;;01/10/2019;31/12/2023;Mise en place d’un optimiseur de relance sur du chauffage collectif;;"Nombre d'optimiseur de relance comprenant une fonction auto-adaptative, avec mention ""conforme à la norme NF EN 12098-1""";;;"Secteur d'activité
+Marque et référence de l'optimiseur
+Surface chauffée
+circuit de chauffage collectif existe depuis plus de 2 ans";;BAT-TH-108 et 116;;BAT-TH-109 A54.3;Optimiseur de relance en chauffage collectif comprenant une fonction auto-adaptative;;01/01/2024;30/06/2028;Mise en place d’un optimiseur de relance sur du chauffage collectif comprenant une fonction auto-adaptative et intègrant une fonction « descente de température (réduit de nuit) » et une fonction « commutateur été/hiver » au sens de la norme NF EN 12098-1.;;"Nombre d'optimiseur de relance, avec mention ""comprenant une fonction auto-adaptative"" et ""conforme à la norme NF EN 12098-1""";;;"Secteur d'activité
+Marque et référence de l'optimiseur
+Nombre d'appartements
+Surface chauffée
+circuit de chauffage collectif existe depuis plus de 2 ans
+Le dispositif intègre les 2 fonctions ";;BAT-TH-108 et 116;;BAT-TH-113 A28.3;Pompe à chaleur de type air/eau ou eau/eau;;01/01/2019;31/12/2023;"Puissance  ≤ 400 kW
+etas ≥ 111% pour les PAC moyenne et haute température,
+etas ≥ 126% pour les PAC basse température.
+Puissance > 400 kW
+COP ≥ 3,4
+
+Couvre les besoins de chauffage seul ou de chauffage et d'ECS. (ECS uniquement non éligible)";;"- la mise en place d’une pompe à chaleur air/eau ou eau/eau ainsi que sa puissance thermique nominale et, pour les PAC de puissance ≤ 400 kW, le type de pompe à chaleur (basse, moyenne ou haute température) ;
+- et la performance énergétique de l’équipement installé : selon la puissance thermique nominale de la pompe à chaleur, le COP explicitement mesuré selon la norme EN 14511-2 pour une température à la sortie de l'échangeur thermique intérieur de 35°C, ou l’efficacité énergétique saisonnière (?s)";En remplacement d'une chaudière gaz;;"Secteur d'activité
+Surface chauffée
+Marque et référence
+Puissance PAC (si inf ou égale à 400 => mentions Type PAC et efficacité énergétique ; si sup à 400 => mention du COP)";;;;BAT-TH-113 A54.4;Pompe à chaleur de type air/eau ou eau/eau;;01/01/2024;31/12/2025;"Puissance  ≤ 400 kW
+etas ≥ 111% pour les PAC moyenne et haute température,
+etas ≥ 126% pour les PAC basse température.
+Puissance > 400 kW
+COP ≥ 3,4 
+
+Couvre les besoins de chauffage seul ou de chauffage et d'ECS. (ECS uniquement non éligible)";;"- la mise en place d’une pompe à chaleur air/eau ou eau/eau ainsi que sa puissance thermique nominale et, pour les PAC de puissance ≤ 400 kW, le type de pompe à chaleur (basse, moyenne ou haute température) ;
+- et la performance énergétique de l’équipement installé : selon la puissance thermique nominale de la pompe à chaleur, le COP explicitement mesuré selon la norme EN 14511-2 pour une température à la sortie de l'échangeur thermique intérieur de 35°C, ou l’efficacité énergétique saisonnière (?s)";En remplacement d'une chaudière gaz;;"Surface chauffée
+Secteur d'activité
+Puissance PAC
+Si ≤ 400 kW, renseigner le ?s & type de pompe à chaleur
+Si > 400 kW, renseigner le COP
+Marque et référence si pas mentionnées sur PA
+Si plusieurs équipement de productions installés, indiqués toutes les puissances";à partir du 01/07/2024;;;BAT-TH-116 A38.3;"Système de gestion technique du bâtiment pour le chauffage,
+l’eau chaude sanitaire, le refroidissement/climatisation,
+l’éclairage et les auxiliaires";;01/11/2021;30/09/2022;système de gestion technique du bâtiment acquis ou amélioré : fonctions de régulation de classe B ou A au sens de la norme NF EN 15232-1 pour l’usage chauffage a minima (et, le cas échéant, ECS, refroidissement, éclairage ou auxiliaires).;;mise en place d’un système de gestion technique du bâtiment assurant, par un système d’automatisation centralisé, les fonctions de régulation de classe B ou A au sens de la norme NF EN 15232-1.;;;"achat ou amélioration
+classe du système précédent le cas échéant
+secteur d'activité
+surface gérée par la GTB en m? en fonction des usages
+classe du système
+Marque et référence";;;;BAT-TH-116 A46.4;"Système de gestion technique du bâtiment pour le chauffage,
+l’eau chaude sanitaire, le refroidissement/climatisation,
+l’éclairage et les auxiliaires";;01/10/2022;"
+31/12/2023";système de gestion technique du bâtiment acquis ou amélioré : fonctions de régulation de classe B ou A au sens de la norme NF EN ISO 52120-1 : 2022 pour l’usage chauffage a minima (et, le cas échéant, ECS, refroidissement, éclairage ou auxiliaires).;;mise en place d’un système de gestion technique du bâtiment assurant, par un système d’automatisation centralisé, les fonctions de régulation de classe B ou A au sens de la norme NF EN ISO 52120-1 : 2022.;;;"achat ou amélioration
+classe du système précédent le cas échéant
+secteur d'activité
+surface gérée par la GTB en m? en fonction des usages
+classe du système
+Marque et référence";;;;BAT-TH-116 A59.5;"Système de gestion technique du bâtiment pour le chauffage,
+l’eau chaude sanitaire, le refroidissement/climatisation,
+l’éclairage et les auxiliaires";;01/01/2024;31/12/2024;"système de gestion technique du bâtiment acquis ou amélioré : fonctions de régulation de classe B ou A au sens de la norme NF EN ISO 52120-1 : 2022 pour l’usage chauffage a minima (et, le cas échéant, ECS, refroidissement, éclairage ou auxiliaires).
+Les surfaces gérées par le système concernant les entrepôts de logistique, les réserves, les entrepôts (frigorifiques ou non) et les locaux de stockage sont exclues.";;mise en place d’un système de gestion technique du bâtiment assurant, par un système d’automatisation centralisé, les fonctions de régulation de classe B ou A au sens de la norme NF EN ISO 52120-1 : 2022.;;;"achat ou amélioration
+classe du système précédent le cas échéant
+secteur d'activité
+surface gérée par la GTB en m? en fonction des usages
+classe du système
+Marque et référence";OUI;;;BAT-TH-116 A59.5;"Système de gestion technique du bâtiment pour le chauffage,
+l’eau chaude sanitaire, le refroidissement/climatisation,
+l’éclairage et les auxiliaires";;01/01/2025;31/12/2029;"système de gestion technique du bâtiment acquis ou amélioré : fonctions de régulation de classe B ou A au sens de la norme NF EN ISO 52120-1 : 2022 pour l’usage chauffage a minima (et, le cas échéant, ECS, refroidissement, éclairage ou auxiliaires).
+Les surfaces gérées par le système concernant les entrepôts de logistique, les réserves, les entrepôts (frigorifiques ou non) et les locaux de stockage sont exclues.";;mise en place d’un système de gestion technique du bâtiment assurant, par un système d’automatisation centralisé, les fonctions de régulation de classe B ou A au sens de la norme NF EN ISO 52120-1 : 2022.;;;"achat ou amélioration
+classe du système précédent le cas échéant
+secteur d'activité
+surface gérée par la GTB en m? en fonction des usages
+classe du système
+Marque et référence";OUI;"BAT-SE-103
+BAT-TH-108
+BAT-SE-109
+BAT-EQ-127
+BAT-TH-122";;BAT-TH-125 A32.2;Ventilation mécanique simple flux avec échangeur à débit d’air constant ou modulé;;01/04/2020;;"Ventilation mécanique simple flux à débit d’air constant ou modulée.
+modulée = si le débit d’air de ventilation est variable et asservi à une détection de présence ou proportionnelle en fonction du nombre d’occupants (avec détectoin)
+Le système de ventilation mécanique simple flux modulée bénéficie d’un avis technique 
+puissance électrique absorbée inférieure ou égale à 0,3 W/(m3/h) au débit nominal
+";avis technique;"- la mise en place d’une ventilation mécanique simple flux à débit d’air constant ou modulée (proportionnelle ou
+à détection de présence) ;
+- la puissance électrique absorbée du caisson de ventilation au débit";;;"Secteur d'activité
+Surface ventilée en m?
+Type de ventilation
+Puissance électrique absorbée
+Marques et références du caisson, des bouches d'extractions et des entrée d'air";;;;BAT-TH-126 A32.2;Ventilation mécanique double flux avec échangeur à débit d’air constant ou modulé;;01/04/2020;;"La mise en place d’une ventilation mécanique double flux modulée à détection de présence ne s’applique pas au cas des salles d’un volume supérieur à 250 m3 et aux locaux sportifs.
+Ventilation mécanique double flux avec échangeur, à débit d’air constant ou modulée à débit
+d’air variable.
+La ventilation mécanique est dite modulée si le débit de ventilation est variable et asservi à une détection de présence ou proportionnel en fonction du nombre d’occupants
+Le caisson de ventilation a une puissance électrique absorbée inférieure ou égale à 0,35 W/(m3/h) par ventilateur audébit nominal (filtres et échangeurs inclus).
+L’efficacité de récupération de l’échangeur est supérieure ou égale à 75 %";avis technique;"- la mise en place d’une ventilation mécanique double flux à débit d’air constant ou
+modulée (proportionnelle ou à détection de présence) à débit d’air variable ;
+- l’efficacité de récupération de l’échangeur mesurée selon la norme NF EN 13053 ou NF EN 308 ;
+- et la puissance électrique absorbée du caisson de ventilation au débit";;;"Secteur d'activité
+Surface ventilée en m?
+Energie de chauffage
+Type de ventilation
+Efficacité de l'échanger
+Puissance électrique absorbée
+Marques et références du caisson, des bouches d'extractions et des entrée d'air";;;;BAT-TH-127 A79.5;Raccordement d’un bâtiment tertiaire à un réseau de chaleur;;01/09/2022;31/12/2025;"le bâtiment n’a jamais été raccordé à un réseau de chaleur dans un délai de 5 ans précédant la date de l'engagement de l'opération
+le cas échéant, le ou les raccordements n'ont pas fait l'objet d'une demande de CEE
+";Contrat de fourniture de chaleur;"La preuve de réalisation est le contrat de fourniture indiquant : l'identité des signataires, la date de signature et l'adresse et la surface chauffée du batiment ainsi que la puissance souscrite
+
+(Coup de pouce) chaudière déposée autre qu'à condensation + énergie";"Réseau de chaleur alimenté majoritairement par des énergies renouvelables ou de récupération.
+En collectif, en remplacement d'une chaudière collective autre qu'à condensation en précisant l'énergie
+En maison, en remplacement d'une chaudière individuelle autre qu'à condensation en précisant l'énergie
+à partir du 29/10/2022 :
+En collectif, en remplacement d'une chaudière collective (y compris à condensation) en précisant l'énergie
+En maison, en remplacement d'une chaudière individuelle (y compris à condensation) en précisant l'énergie
+
+CdP par batiment raccordé
+";;"Nom du réseau
+Usage de la chaleur (chauffage ou chauffage et ECS)";;;;BAT-TH-127 A79.5;Raccordement d’un bâtiment tertiaire à un réseau de chaleur;;01/01/2026;;"le bâtiment n’a jamais été raccordé à un réseau de chaleur dans un délai de 5 ans précédant la date de l'engagement de l'opération
+le cas échéant, le ou les raccordements n'ont pas fait l'objet d'une demande de CEE
+";Contrat de fourniture de chaleur;"La preuve de réalisation est le contrat de fourniture indiquant : l'identité des signataires, la date de signature et l'adresse et  la surface chauffée du batiment  ainsi que la puissance souscrite
+
+(Coup de pouce) chaudière déposée autre qu'à condensation + énergie
+La dépose d'une chaudière suffit et non tous les équipements à énergie fossile
+ -> Dérogation à la dépose possible sur attestation mise à dispo sur le site du ministère : 
+1.Il est constaté la présence d’ amiante dans les équipements
+2.L’évacuation des équipements implique la destruction d'une partie du bâtiment ( toit ou terrasse)
+3.Les équipements se situent en terrasse et leur évacuation nécessiterait l’utilisation d’une grue ou d’un
+hélicoptère 
+";"Réseau de chaleur efficace au sens de l'article L.711-4
+En collectif, en remplacement d'une chaudière collective (y compris à condensation) en précisant l'énergie
+En maison, en remplacement d'une chaudière individuelle (y compris à condensation) en précisant l'énergie
+
+ CdP par sous-station raccordée";;"Nom du réseau
+Usage de la chaleur (chauffage ou chauffage et ECS)
+Identifiant ID-RNB du batiment raccordé
+Adresse de la sous-station et s'il existe ID-RNB du bat ou local technique de la SST";;;;BAT-TH-158 A40.1;Pompe à chaleur réversible de type air/air;;29/12/2021;30/01/2022;"PAC air/air réversible de puissance inférieure ou égales à 1 MW
+Puissance  ≤ 12kW
+SCOP ≥ 4,2
+SEER ≥ 6
+Puissance > 12 kW (PAC hors toiture)
+etas ≥ 145 % pour le chauffage
+etas ≥ 250 % pour le refroidissement
+Puissance > 12 kW (PAC toiture-rooftop)
+etas ≥ 130 % pour le chauffage
+etas ≥ 150 % pour le refroidissement";;"- la mise en place d’une pompe à chaleur réversible de type air/air ; En toiture/rooftop ou autre
+- les puissances frigorifique et calorifique nominales de la pompe à chaleur ;
+- pour une PAC de type air/air de puissance ≤ 12 kW, les e SCOP et SEER ;
+- pour une PAC de type air/air de puissance calorifique nominale > 12 kW, le type de PAC (PAC en toiture, ou « rooftop » ; autre PAC), les efficacités énergétiques saisonnières (Etas) de l’équipement pour le
+chauffage et le refroidissement des locaux.";;;"Type de PAC et son ordre de puissance
+Surface totale chauffée (m?)
+Secteur d'activité
+Puissance calorifique installée
+Puissance frigorique installée
+SCOP et SEER
+Etas
+Marque et référence";;;;BAT-TH-158 A42.2;Pompe à chaleur réversible de type air/air;;31/01/2022;31/12/2024;"PAC air/air réversible de puissance inférieure ou égales à 1 MW
+Puissance  ≤ 12kW
+SCOP ≥ 4,2
+SEER ≥ 6
+Puissance > 12 kW (PAC hors toiture)
+etas ≥ 145 % pour le chauffage
+etas ≥ 250 % pour le refroidissement
+Puissance > 12 kW (PAC toiture-rooftop)
+etas ≥ 130 % pour le chauffage
+etas ≥ 150 % pour le refroidissement";;"- la mise en place d’une pompe à chaleur réversible de type air/air ; En toiture/rooftop ou autre
+- les puissances frigorifique et calorifique nominales de la pompe à chaleur ;
+- pour une PAC de type air/air de puissance ≤ 12 kW, les e SCOP et SEER ;
+- pour une PAC de type air/air de puissance calorifique nominale > 12 kW, le type de PAC (PAC en toiture, ou « rooftop » ; autre PAC), les efficacités énergétiques saisonnières (Etas) de l’équipement pour le
+chauffage et le refroidissement des locaux.";;;"Type de PAC et son ordre de puissance
+Surface totale chauffée (m?)
+Secteur d'activité
+Puissance calorifique installée
+Puissance frigorique installée
+SCOP et SEER
+Etas
+Marque et référence";;;;BAT-TH-158 A62.3;Pompe à chaleur réversible de type air/air;;01/01/2025;31/12/2029;"PAC air/air réversible de puissance inférieure ou égales à 1 MW
+Puissance  ≤ 12kW
+SCOP ≥ 4,2
+SEER ≥ 6,1
+Puissance > 12 kW (PAC hors toiture)
+etas ≥ 145 % pour le chauffage
+etas ≥ 250 % pour le refroidissement
+Puissance > 12 kW (PAC toiture-rooftop)
+etas ≥ 130 % pour le chauffage
+etas ≥ 150 % pour le refroidissement";;"- la mise en place d’une pompe à chaleur réversible de type air/air ; En toiture/rooftop ou autre
+- les puissances frigorifique et calorifique nominales de la pompe à chaleur ;
+- pour une PAC de type air/air de puissance ≤ 12 kW, les e SCOP et SEER ;
+- pour une PAC de type air/air de puissance calorifique nominale > 12 kW, le type de PAC (PAC en toiture, ou « rooftop » ; autre PAC), les efficacités énergétiques saisonnières (Etas) de l’équipement pour le
+chauffage et le refroidissement des locaux.";;;"Type de PAC et son ordre de puissance
+Surface totale chauffée (m?)
+Secteur d'activité
+Puissance calorifique installée
+Puissance frigorique installée
+SCOP et SEER
+Etas
+Marque et référence";;;;BAT-TH-162 A75.1;Système géothermique;;01/01/2026;31/12/2030;"Chauffage uniquement ou Chauffage et ECS (donc ECS ou rafraichissement uniquement exclu)
+
+Système composé de :
+a - échangeur géothermique ouvert ou fermé
+b - une ou plusieurs PAC  eau/eau ou eau glycolée/eau de puissance minimale totale de 30 kW + équipement hydrauliques (pompes, échangeurs, ballons tampon, etc)
+c - dispositif de régulation de l'ensemble du système 
+
+Les PAC sont de type :  eau/eau sur aquifère superficiel (profondeur < 200m)
+ou eau glycolée/eau sur sondes géothermiques
+
+Le système n’est pas lié à un réseau de chaleur ou de froid ou à une boucle d’eau tempérée géothermique (BETEG).
+
+Si P ≤ 400 kW :
+etas ≥ 111% pour les PAC moyenne et haute température,
+etas ≥ 126% pour les PAC basse température.
+
+Si P > 400 kW :
+COP ≥ 4  selon EN 14511-2 régime 0/-3°C et 30/35°C
+COP ≥ 4,5 selon EN 14511-2 régime 10/7°C et 30/35°C
+
+Quelque soit P si production de froid :
+EER frigo ≥ 3,6 selon EN 14511 régime 12/7°C et 30/35°C
+Si géocooling, alors SEER > 20 en sonde géothermique et SEER > 14 en aquifère superficiel
+
+Réalisation d'une étude préalable de dimensionnement";"Etude de dimensionnement avec :
+- raison social du bénéficiaire
+- adresse des travaux
+- caractéristiques des locaux à chauffer (surface chauffée, nombre d'émetteurs, type d'éméetteurs, régime de température, température intérieure)
+- si ECS, caractéristique des besoins ECS (nombre de points de soutirage, volume d'eau chauffée,...)
+- les consommations énergétiques AVANT TRAVAUX, de chauffage et d'ECS le cas échéant.
+- les besoins énergétiques APRES TRAVAUX en tenant compte des autres travaux le cas échéant (isolation, etc)
+- les variations de besoin et DJU
+- la puissance de chaque PAC
+- l'etas ou le COP de chaque PAC
+- les caractéristiques des autres production présentes dans la chaufferie
+- les caractéristiques des ressources géothermiques : contexte réglementaiure, contexte géologique, coupe géologique prévisionnelle
+- schéma d'implantation des sondes ou des puits avec sens d'écoulement et régimes de températures
+- cas échangement ouvert sur aquif-ère : nmbre de forage et usage, prodondeur, débit de pointte, température géologique
+- cas échangeur fermé à sondes : nombre de sondes, longueur totale, profondeur, type de sonde, diamètres, espacement, puissance prélevée, ratio puissance prévelevée W/ml, nombre d'heure de fonctionnement
+
+";"- la mise en place d’un système géothermique comprenant un captage géothermique, associé à une ou plusieurs pompe(s) à chaleur, à des équipements hydrauliques et à un dispositif de régulation, pour un usage en chauffage ou en chauffage et eau chaude sanitaire, et éventuellement pour le refroidissement du bâtiment;
+- les caractéristiques du dispositif de captage (échangeur thermique ouvert ou fermé) ;
+- les caractéristiques de la (ou des) pompe(s) à chaleur installée(s) : l’usage couvert la (ou les) pompe(s) à chaleur (chauffage ; chauffage et eau chaude sanitaire et éventuellement refroidissement), type de pompe(s) à chaleur (eau/eau sur aquifère superficiel ou eau glycolée/eau sur sonde géothermique), type de refroidissement (pompe(s) à chaleur géothermique(s) réversible(s), rafraîchissement passif ou « geocooling », pompe(s) à chaleur géothermique(s) avec un fonctionnement en thermofrigopompe), puissance calorifique mesurée dans les conditions de performance nominale du mode chauffage basse température prévues par la norme NF EN 14511-2, pour les PAC de puissance ≤ 400 kW le type d’application pour l’installation de la pompe à chaleur (basse, moyenne ou haute température), la mise en place d’un régulateur ;
+- la performance énergétique de la (des) pompe(s) à chaleur installée(s) : selon la puissance thermique nominale de la pompe à chaleur, le coefficient de performance (COP) mesuré selon les conditions de la norme EN 14511-2 pour une pour une température à la sortie de l'échangeur thermique intérieur de 35°C, ou l’efficacité énergétique saisonnière (Etas), éventuellement le coefficient de performance frigorifique (EER, SEER) selon le type de refroidissement du bâtiment.I106";;"Le professionnel réalisant l'étude :
+RGE Etudes OPQIBI 10.07 « Etude des ressources géothermiques » Professionnel réalisant l’ingénierie de conception ou de réalisation : 
+RGE Etudes OPQIBI 20.13 « Maîtrise d'oeuvre des installations de production utilisant l'énergie géothermique »";"Surface chauffée
+Composition du disposirtif de captage : échangeur, production, régulation
+Type d'échanger
+Type de PAC
+Type de besoins couverts (chauffage, ECS, Froid)
+Lien avec un réseau de chaleur ou froid ou BETEG
+Présence d'une note de dimensionnement
+Puissance de la PAC
+Efficacité de la PAC
+Régime de température
+COP ou COP EER
+coefficient SEER
+Marque
+Référence
+";;BAT-TH-164;;BAT-TH-163 A75.1;Pompe à chaleur de type air/eau;;01/01/2026;31/12/2030;"Chauffage uniquement ou Chauffage et ECS (donc ECS uniquement exclu)
+
+P ≤ 400 kW :
+etas ≥ 111% pour les PAC moyenne et haute température,
+etas ≥ 126% pour les PAC basse température.
+
+Si P > 400 kW :
+COP ≥ 3,4  selon EN 14511-2  pour une température à la sortie de l'échangeur thermique intérieur de 35°C
+
+";"Note de dimensionnement : 
+calcul des déperditions à Tbase
+puissance sélectionné
+PAC sélectionnée";"- la mise en place d’une ou de plusieurs pompe(s) à chaleur de type air/eau ;
+- la puissance thermique nominale de chaque pompe à chaleur installée ;
+- l’usage de la pompe à chaleur (chauffage ; chauffage et eau chaude sanitaire) ;
+- le type de pompe à chaleur (basse, moyenne ou haute température) ;
+- et l’efficacité énergétique saisonnière (Etas) selon le règlement (EU) n° 813/2013 de la commission du 2 août 2013.";;"Si chauffage uniquement :
+RGE pompes à chaleur pour la production de chauffage ;
+
+Si chauffage + ECS, il faut les deux qualifications :
+RGE pompes à chaleur pour la production de chauffage ;
+RGE pompes à chaleur dédiées à la production d'eau chaude sanitaire ;";"Surface chauffée
+Présence d'une note de dimensionnement
+Besoins couverts (Chauffage ou Cffauge&ECS)
+Puissance
+Efficacité
+Régime de température
+marque
+référence
+puissance chaufferie";;;;BAT-TH-164 A75.1;Pompe à chaleur de type eau/eau ou eau glycolée/eau;;01/01/2026;31/12/2030;"Chauffage uniquement ou Chauffage et ECS (donc ECS uniquement exclu)
+
+P ≤ 400 kW :
+etas ≥ 111% pour les PAC moyenne et haute température,
+etas ≥ 126% pour les PAC basse température.
+
+Si P > 400 kW :
+COP ≥ 3,4  selon EN 14511-2  pour une température à la sortie de l'échangeur thermique intérieur de 35°C
+
+";"Note de dimensionnement : 
+calcul des déperditions à Tbase
+puissance sélectionné
+PAC sélectionnée";"- la mise en place d’une ou de plusieurs pompe(s) à chaleur de type eau/eau ou eau glycolée/eau ;
+- la puissance thermique nominale de chaque pompe à chaleur installée ;
+- l’usage de la pompe à chaleur (chauffage ; chauffage et eau chaude sanitaire) ;
+- le type de pompe à chaleur (basse, moyenne ou haute température) ;
+- et l’efficacité énergétique saisonnière (Etas) selon le règlement (EU) n° 813/2013 de la commission du 2 août 2013.";;"Si chauffage uniquement :
+RGE pompes à chaleur pour la production de chauffage ;
+
+Si chauffage + ECS, il faut les deux qualifications :
+RGE pompes à chaleur pour la production de chauffage ;
+RGE pompes à chaleur dédiées à la production d'eau chaude sanitaire ;";"Surface chauffée
+Présence d'une note de dimensionnement
+Besoins couverts (Chauffage ou Cffauge&ECS)
+Puissance
+Efficacité
+Régime de température
+marque
+référence
+puissance chaufferie";;BAT-TH-162;;
