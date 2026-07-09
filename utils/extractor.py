@@ -57,10 +57,78 @@ def get_page_count(pdf_path: Path) -> int:
     return 1
 
 
-def extract_text_from_pdf(pdf_path: Path, max_chars: int = 6000) -> str:
+import re as _re
+
+_FICHE_SECTION_PATTERN = _re.compile(
+    r"BA[RT]-(?:EN|TH|SE)-\d+", _re.IGNORECASE
+)
+
+
+def smart_truncate(text: str, max_chars: int = 15000) -> str:
+    """
+    Troncature "intelligente" d'un texte de document CEE, qui préserve
+    chaque section de fiche détectée (utile pour les documents multi-fiches
+    comme une AH à plusieurs parties A, où une troncature naïve tête+queue
+    peut effacer entièrement une fiche située au milieu d'un document long).
+
+    Utilisée à la fois lors de l'extraction (extract_text_from_pdf) et lors
+    de l'assemblage final du prompt (claude_client._build_docs_section), pour
+    qu'aucune des deux étapes ne réintroduise le bug par une troncature
+    naïve appliquée après coup.
+    """
+    if len(text) <= max_chars:
+        return text
+
+    fiche_positions = [m.start() for m in _FICHE_SECTION_PATTERN.finditer(text)]
+
+    # Un seul code fiche (ou aucun) trouvé -> troncature simple tête+queue,
+    # comportement historique, suffisant pour un document mono-fiche.
+    if len(fiche_positions) <= 1:
+        half = max_chars // 2
+        return text[:half] + "\n\n[...]\n\n" + text[-half:]
+
+    # Plusieurs codes fiche détectés, potentiellement espacés dans le
+    # document (AH multi-fiches) -> on garde une fenêtre de contexte
+    # autour de CHAQUE occurrence, plutôt que de risquer d'en effacer une.
+    window = 1200  # caractères de contexte avant/après chaque occurrence
+    ranges = []
+    for pos in fiche_positions:
+        start = max(0, pos - 200)
+        end = min(len(text), pos + window)
+        ranges.append((start, end))
+
+    # Toujours garder le tout début (identité, numéro dossier) et la
+    # toute fin (signatures) du document, en plus des fenêtres par fiche.
+    ranges.append((0, min(800, len(text))))
+    ranges.append((max(0, len(text) - 800), len(text)))
+
+    # Fusionner les plages qui se chevauchent ou se touchent
+    ranges.sort()
+    merged = [ranges[0]]
+    for start, end in ranges[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end + 100:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+
+    blocks = [text[s:e] for s, e in merged]
+    assembled = "\n\n[...]\n\n".join(blocks)
+
+    # Filet de sécurité : si l'assemblage dépasse encore largement la
+    # limite (cas extrême, beaucoup de fiches très espacées), retomber
+    # sur une troncature tête+queue globale plutôt que d'exploser les tokens.
+    if len(assembled) > max_chars * 2:
+        half = max_chars // 2
+        return text[:half] + "\n\n[...]\n\n" + text[-half:]
+
+    return assembled
+
+
+def extract_text_from_pdf(pdf_path: Path, max_chars: int = 15000) -> str:
     """
     Extrait le texte d'un PDF avec pdftotext.
-    Limite à max_chars pour maîtriser les tokens.
+    Limite à max_chars pour maîtriser les tokens, via smart_truncate().
     """
     try:
         result = subprocess.run(
@@ -70,10 +138,7 @@ def extract_text_from_pdf(pdf_path: Path, max_chars: int = 6000) -> str:
             timeout=30,
         )
         text = result.stdout.strip()
-        if len(text) > max_chars:
-            half = max_chars // 2
-            text = text[:half] + "\n\n[...]\n\n" + text[-half:]
-        return text
+        return smart_truncate(text, max_chars)
     except Exception as e:
         return f"[Erreur extraction texte: {e}]"
 
