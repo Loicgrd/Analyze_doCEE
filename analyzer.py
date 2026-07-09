@@ -60,27 +60,32 @@ def process_dossier(input_path: str, rules_dir: str, verbose: bool = False, dry_
         correspondance_table = loader.get_fiche_correspondance_table()
 
         if fiche_override:
+            # Accepte une ou plusieurs fiches séparées par des virgules (dossier multi-fiches)
+            fiches_list = [f.strip().upper() for f in fiche_override.split(",") if f.strip()]
             classification = classify_dossier(
                 docs, correspondance_table=correspondance_table,
                 use_correspondance_table=use_correspondance_table,
             )
-            classification["fiche"] = fiche_override
-            classification["secteur"] = "BAT" if fiche_override.upper().startswith("BAT") else "BAR"
+            classification["fiches"] = fiches_list
+            classification["secteur"] = "BAT" if fiches_list[0].startswith("BAT") else "BAR"
             classification["confiance"] = "haute"
-            classification["raisonnement"] = "Fiche indiquée manuellement par l'utilisateur"
+            classification["raisonnement"] = "Fiche(s) indiquée(s) manuellement par l'utilisateur"
             if verbose:
-                print(f"   → Fiche imposée manuellement : {fiche_override}")
+                print(f"   → Fiche(s) imposée(s) manuellement : {', '.join(fiches_list)}")
         else:
             classification = classify_dossier(
                 docs, correspondance_table=correspondance_table,
                 use_correspondance_table=use_correspondance_table,
             )
+            fiches_detected = classification.get("fiches", [classification.get("fiche", "INCONNUE")])
             if verbose:
-                print(f"   → Fiche détectée : {classification['fiche']}")
-                print(f"   → Confiance      : {classification.get('confiance', '?')}")
-                if classification['fiche'] == "INCONNUE":
+                print(f"   → Fiche(s) détectée(s) : {', '.join(fiches_detected)}")
+                print(f"   → Confiance            : {classification.get('confiance', '?')}")
+                if fiches_detected == ["INCONNUE"]:
                     print("   ⚠️  ALERTE : aucune fiche identifiée — vérifier le VISA/document "
-                          "listant la fiche, ou indiquer la fiche manuellement (--fiche).")
+                          "listant la fiche, ou indiquer la/les fiche(s) manuellement (--fiche).")
+                elif len(fiches_detected) > 1:
+                    print(f"   ℹ️  Dossier multi-fiches détecté ({len(fiches_detected)} fiches)")
 
         core_rules = loader.get_core_rules_text()
         variable_rules = loader.get_variable_rules_text(classification)
@@ -112,7 +117,7 @@ def main():
     parser.add_argument("--rules", default="./rules_data")
     parser.add_argument("--output", default=None)
     parser.add_argument("--dry-run", action="store_true", help="Assemble le prompt sans appeler l'API (gratuit)")
-    parser.add_argument("--fiche", default=None, help="Impose la fiche BAR/BAT (ex: BAR-EN-105), contourne la classification")
+    parser.add_argument("--fiche", default=None, help="Impose la ou les fiche(s) BAR/BAT (ex: BAR-EN-105 ou BAR-TH-106,BAR-TH-127 pour un dossier multi-fiches), contourne la classification")
     parser.add_argument("--no-table", action="store_true", help="Désactive la table de correspondance fiche<->travaux en classification IA (test A/B)")
     parser.add_argument("-v", "--verbose", action="store_true")
 
@@ -131,14 +136,16 @@ def main():
                 print("MODE TEST — AUCUN APPEL API")
                 print("=" * 60)
                 tk = result["tokens_estimation"]
-                print(f"Fiche détectée   : {result['classification']['fiche']}")
+                fiches_str = ', '.join(result['classification'].get('fiches', [result['classification'].get('fiche', '?')]))
+                print(f"Fiche(s) détectée(s) : {fiches_str}")
                 print(f"Tokens estimés   : {tk['total_input']:,} input + {tk['output_estime']:,} output")
                 print(f"Coût si réel     : ~{result['cout_estime_eur']['premier_appel']:.4f} € (1er appel)")
                 print(f"                   ~{result['cout_estime_eur']['appels_suivants_avec_cache']:.4f} € (avec cache)")
             else:
                 print("RÉSULTAT D'ANALYSE")
                 print("=" * 60)
-                print(f"Fiche applicable : {result['classification']['fiche']}")
+                fiches_str = ', '.join(result['classification'].get('fiches', [result['classification'].get('fiche', '?')]))
+                print(f"Fiche(s) applicable(s) : {fiches_str}")
                 print(f"Statut           : {result.get('statut', 'N/A')}")
                 print(f"Tokens utilisés  : {result.get('tokens_used', 'N/A')}")
                 print("\n--- Analyse détaillée ---")
