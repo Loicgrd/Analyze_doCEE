@@ -6,12 +6,6 @@ Usage :
     2. Remplir eval/expected_results.json avec les verdicts attendus
     3. Lancer : python eval/run_eval.py --rules ./rules_data
 
-Le script compare pour chaque dossier :
-    - la fiche détectée vs attendue
-    - le statut global vs attendu
-    - la présence des points bloquants attendus dans l'analyse (recherche souple)
-
-Sortie : tableau de synthèse + rapport détaillé eval/rapport_eval.json
 Coût typique : ~0,05 € par dossier évalué.
 """
 
@@ -32,14 +26,11 @@ REPORT_FILE = EVAL_DIR / "rapport_eval.json"
 
 
 def _norm(s: str) -> str:
-    """Normalise pour comparaison souple (minuscules, sans accents)."""
     s = unicodedata.normalize("NFD", s.lower())
     return "".join(c for c in s if unicodedata.category(c) != "Mn")
 
 
 def _point_found(point: str, analyse: str) -> bool:
-    """Un point bloquant attendu est 'trouvé' si ses mots-clés significatifs
-    (>4 lettres) apparaissent majoritairement dans l'analyse."""
     analyse_n = _norm(analyse)
     words = [w for w in _norm(point).split() if len(w) > 4]
     if not words:
@@ -51,7 +42,7 @@ def _point_found(point: str, analyse: str) -> bool:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rules", default="./rules_data")
-    parser.add_argument("--only", default=None, help="Ne tester qu'un fichier (ex: T185261.zip)")
+    parser.add_argument("--only", default=None)
     args = parser.parse_args()
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -105,7 +96,6 @@ def main():
         print("\nAucun dossier évaluable. Remplir expected_results.json et eval/dossiers/.")
         return
 
-    # ── Synthèse ──────────────────────────────────────────────────────
     n = len(results)
     ok = sum(1 for r in results if r["global_ok"])
     print("\n" + "=" * 62)
@@ -125,9 +115,7 @@ def main():
                 print(f"   point manqué : {p}")
     print(f"\nCoût de la campagne : ~{total_cost_eur:.2f} €")
 
-    REPORT_FILE.write_text(
-        json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    REPORT_FILE.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Rapport détaillé : {REPORT_FILE}")
 
 
