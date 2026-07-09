@@ -51,6 +51,7 @@ Réponds UNIQUEMENT en JSON valide, sans texte avant ou après, avec exactement 
   "coup_de_pouce": false,
   "type_engagement": "ordre_de_service",
   "sous_traitance": false,
+  "date_engagement": "23/02/2024",
   "confiance": "haute",
   "raisonnement": "explication courte citant les éléments des documents qui ont motivé ce choix"
 }}
@@ -70,6 +71,12 @@ Valeurs possibles :
 - coup_de_pouce : true/false
 - type_engagement : "ordre_de_service" | "bon_de_commande" | "acte_engagement" | "devis" | "inconnu"
 - sous_traitance : true si un sous-traitant est mentionné
+- date_engagement : date d'engagement du dossier au format JJ/MM/AAAA, telle qu'elle
+  apparaît sur le document d'engagement (OS, AE, devis, BC) ou à défaut sur le VISA
+  ("Date d'engagement : ..."). CRITIQUE : cette date détermine quelle VERSION de la
+  fiche s'applique (les fiches CEE ont plusieurs versions successives avec des
+  critères techniques différents selon la période). Mets null si aucune date
+  d'engagement n'est identifiable dans les documents fournis.
 - confiance : "haute" (code explicite ou nature des travaux sans ambiguïté) |
   "moyenne" (déduit de la nature des travaux, quelques incertitudes) |
   "faible" (peu d'éléments techniques exploitables)
@@ -154,8 +161,16 @@ def classify_dossier_ia(
         result.setdefault("coup_de_pouce", False)
         result.setdefault("type_engagement", "inconnu")
         result.setdefault("sous_traitance", False)
+        result.setdefault("date_engagement", None)
         result.setdefault("confiance", "moyenne")
         result.setdefault("raisonnement", "")
+
+        # Filet de sécurité : si Sonnet n'a pas trouvé de date malgré la demande,
+        # tenter une extraction regex en secours plutôt que de rester sans date.
+        if not result.get("date_engagement"):
+            full_text = " ".join(d.get("text", "") for d in docs.values())
+            result["date_engagement"] = _extract_date_engagement_regex(full_text)
+
         return result
 
     except Exception as e:
@@ -232,17 +247,23 @@ def classify_dossier_regex(docs: Dict[str, dict]) -> Dict:
         k in full_text_lower for k in ["tertiaire", "bat-", "bâtiment non résidentiel"]
     ) else "BAR"
 
+    date_engagement = _extract_date_engagement_regex(full_text)
+
     return {
         "fiches": [fiche_detected] if fiche_detected else ["INCONNUE"],
         "secteur": secteur,
         "coup_de_pouce": any(k in full_text_lower for k in ["coup de pouce", "cdp", "charte"]),
         "type_engagement": _detect_engagement_type(full_text_lower),
         "sous_traitance": any(k in full_text_lower for k in ["sous-traitant", "dc4"]),
+        "date_engagement": date_engagement,
         "confiance": "moyenne",
         "raisonnement": "Classification par regex (sans IA) — fiable seulement si le code "
                          "fiche ou un mot-clé générique est explicitement écrit. Le regex ne "
                          "détecte qu'UNE fiche à la fois : si le dossier en couvre plusieurs, "
-                         "utiliser la classification IA ou le mode manuel multi-fiches.",
+                         "utiliser la classification IA ou le mode manuel multi-fiches."
+                         + ("" if date_engagement else " Date d'engagement non détectée par "
+                            "regex : le filtrage de version de fiche par date sera dégradé "
+                            "(toutes les versions seront envoyées)."),
     }
 
 
@@ -301,6 +322,44 @@ def classify_dossier(
 
 def _known_fiches_from_patterns() -> set:
     return {name for _, name in FICHE_PATTERNS}
+
+
+_DATE_PATTERN = re.compile(r"(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})")
+
+def _extract_date_engagement_regex(full_text: str) -> str:
+    """
+    Recherche une date d'engagement par proximité textuelle avec des mots-clés
+    usuels ("date d'engagement", "fait à ... le", date de signature MOA...).
+    Fallback utilisé quand la classification IA n'est pas déclenchée (code fiche
+    trouvé explicitement par regex) — indispensable pour que le filtrage de
+    version de fiche par date fonctionne même sur le chemin rapide sans IA.
+    Retourne None si rien de fiable n'est trouvé (mieux vaut aucune date qu'une
+    date fausse qui sélectionnerait la mauvaise version de fiche).
+    """
+    keywords = [
+        "date d'engagement",
+        "date d engagement",
+        "engagement :",
+    ]
+    text_lower = full_text.lower()
+
+    for kw in keywords:
+        idx = text_lower.find(kw)
+        if idx == -1:
+            continue
+        window = full_text[idx:idx + 60]
+        m = _DATE_PATTERN.search(window)
+        if m:
+            day, month, year = m.groups()
+            if len(year) == 2:
+                year = "20" + year
+            try:
+                day_i, month_i = int(day), int(month)
+                if 1 <= day_i <= 31 and 1 <= month_i <= 12:
+                    return f"{day_i:02d}/{month_i:02d}/{year}"
+            except ValueError:
+                continue
+    return None
 
 
 def _detect_engagement_type(text_lower: str) -> str:
