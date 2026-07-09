@@ -43,6 +43,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--rules", default="./rules_data")
     parser.add_argument("--only", default=None)
+    parser.add_argument("--no-table", action="store_true",
+                         help="Désactive la table de correspondance fiche<->travaux (test A/B)")
+    parser.add_argument("--compare", action="store_true",
+                         help="Lance la campagne AVEC puis SANS la table, affiche un comparatif côte à côte")
     args = parser.parse_args()
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -68,7 +72,7 @@ def main():
             continue
 
         print(f"▶  Analyse de {entry['fichier']}...")
-        res = process_dossier(str(zip_path), args.rules)
+        res = process_dossier(str(zip_path), args.rules, use_correspondance_table=not args.no_table)
 
         fiche_ok = res["classification"]["fiche"] == att["fiche"]
         statut_ok = res["statut"] == att["statut"]
@@ -117,7 +121,82 @@ def main():
 
     REPORT_FILE.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Rapport détaillé : {REPORT_FILE}")
+    return results
+
+
+def compare_with_without_table(rules_dir: str, only: str = None):
+    """
+    Lance la campagne d'éval deux fois (avec puis sans la table de
+    correspondance fiche<->travaux) et affiche un comparatif côte à côte.
+    Permet de vérifier empiriquement si la table change les résultats sur
+    votre corpus, plutôt que de le supposer.
+    """
+    print("=" * 62)
+    print("CAMPAGNE A/B — AVEC table de correspondance")
+    print("=" * 62)
+    results_with = _run_all(rules_dir, only, use_table=True)
+
+    print("\n" + "=" * 62)
+    print("CAMPAGNE A/B — SANS table de correspondance")
+    print("=" * 62)
+    results_without = _run_all(rules_dir, only, use_table=False)
+
+    print("\n" + "=" * 62)
+    print("COMPARATIF AVEC vs SANS table")
+    print("=" * 62)
+    print(f"{'Dossier':<16}{'Avec table':<28}{'Sans table':<28}{'Écart ?'}")
+    by_fichier_with = {r["fichier"]: r for r in results_with}
+    by_fichier_without = {r["fichier"]: r for r in results_without}
+    n_diff = 0
+    for fichier in by_fichier_with:
+        rw = by_fichier_with[fichier]
+        rwo = by_fichier_without.get(fichier)
+        if not rwo:
+            continue
+        fw = rw["fiche"]["obtenu"]
+        fwo = rwo["fiche"]["obtenu"]
+        diff = "⚠️ OUI" if fw != fwo else "—"
+        if fw != fwo:
+            n_diff += 1
+        print(f"{fichier:<16}{fw:<28}{fwo:<28}{diff}")
+
+    print(f"\n{n_diff}/{len(by_fichier_with)} dossier(s) avec un résultat différent selon la table.")
+    if n_diff == 0:
+        print("→ Sur ce corpus, la table de correspondance ne change aucun résultat : "
+              "envisageable de la retirer pour économiser ~1500 tokens/dossier en mode IA.")
+    else:
+        print("→ La table change le résultat sur au moins un dossier : recommandé de la garder.")
+
+
+def _run_all(rules_dir: str, only: str, use_table: bool):
+    expected = json.loads(EXPECTED_FILE.read_text(encoding="utf-8"))["dossiers"]
+    if only:
+        expected = [e for e in expected if e["fichier"] == only]
+
+    results = []
+    for entry in expected:
+        zip_path = DOSSIERS_DIR / entry["fichier"]
+        att = entry["attendu"]
+        if "A_COMPLETER" in str(att.get("statut", "")) or not zip_path.exists():
+            continue
+        print(f"▶  {entry['fichier']}...")
+        res = process_dossier(str(zip_path), rules_dir, use_correspondance_table=use_table)
+        results.append({
+            "fichier": entry["fichier"],
+            "fiche": {"attendu": att["fiche"], "obtenu": res["classification"]["fiche"]},
+            "statut": {"attendu": att["statut"], "obtenu": res["statut"]},
+        })
+    return results
 
 
 if __name__ == "__main__":
-    main()
+    import argparse as _ap
+    _pre = _ap.ArgumentParser(add_help=False)
+    _pre.add_argument("--compare", action="store_true")
+    _pre.add_argument("--rules", default="./rules_data")
+    _pre.add_argument("--only", default=None)
+    _known, _ = _pre.parse_known_args()
+    if _known.compare:
+        compare_with_without_table(_known.rules, _known.only)
+    else:
+        main()
