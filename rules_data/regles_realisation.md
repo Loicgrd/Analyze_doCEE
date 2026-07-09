@@ -19,25 +19,30 @@ La preuve de réalisation est le document marché qui permet d'attester de la r�
 4. Le **lieu des travaux** (nom de résidence accepté)
 5. Le **détail des travaux** avec les éléments techniques (facturation avec prix HT)
 
-### Checklist technique transversale (point 5, détaillée)
+### Éléments techniques précis (point 5) — voir le référentiel par fiche
 
-Ces éléments sont **communs à toutes les fiches BAR/BAT**, en plus des critères
-techniques spécifiques de chaque fiche (résistance thermique, efficacité,
-puissance, etc. — voir la fiche concernée). Ils doivent figurer sur la preuve
-de réalisation elle-même (facture, DGD, ou annexe technique qui en fait
-partie intégrante) — **jamais uniquement sur l'AH** (cf. `regles_ah.md`,
-règle générale 7).
+Les éléments techniques exacts à exiger sur la preuve de réalisation sont
+**spécifiques à chaque fiche ET à chaque version de fiche** (les exigences
+évoluent dans le temps — une même fiche peut devenir plus stricte d'une
+version à l'autre). Ils sont fournis par le référentiel `Fiche_BAR.xlsx`,
+filtré automatiquement sur la version applicable à la date d'engagement,
+avec deux niveaux distincts :
 
-| Élément | Description | Systématique ? |
-|---|---|---|
-| **Marque** | Marque commerciale du produit/équipement posé | ✅ Toujours |
-| **Référence** | Référence exacte du modèle posé | ✅ Toujours |
-| **Quantité / Surface** | Nombre d'unités posées, ou surface en m² pour l'isolation | ✅ Toujours |
-| **Caractéristique technique principale** | La valeur qui conditionne l'éligibilité de la fiche (R pour l'isolation, Etas pour une chaudière, ΔT pour un radiateur, puissance élec. pour une VMC...) | ✅ Toujours — voir fiche concernée pour le seuil exact |
-| **Certification produit** | ACERMI (isolants), CSTBat (VMC, menuiseries), Avis technique, ou norme NF citée | ⚠️ Selon la fiche |
-| **Adresse d'intervention** | Adresse précise du chantier (numéro + rue + CP + ville) | ✅ Toujours, sur au moins un document du dossier (cf. `regles_validation.md`) |
-| **Date de début des travaux / date de visite préalable** | Utile pour vérifier la cohérence chronologique avec l'engagement | ⚠️ Recommandé, pas toujours exigé selon la fiche |
-| **Prix unitaire HT** | Permet la vérification du lien fort engagement↔réalisation | ✅ Toujours |
+- **Mentions OBLIGATOIRES** : leur absence sur la preuve de réalisation est
+  un point bloquant, sauf tolérance explicitement prévue (logique "OU" —
+  voir ci-dessous).
+- **Mentions non obligatoires mais nécessaires** : leur absence n'est pas
+  bloquante en soi, mais elles sont souvent indispensables pour vérifier
+  la conformité aux conditions techniques d'éligibilité (ex: la marque et
+  la référence permettent de vérifier une caractéristique technique quand
+  la valeur brute n'est pas directement indiquée).
+
+> **Logique "OU" fréquente** : certaines fiches acceptent une preuve de
+> réalisation mentionnant SOIT la valeur technique brute directement
+> (ex: Etas, R, ΔT) SOIT la marque et la référence du produit (permettant
+> de retrouver la valeur par une fiche technique produit). Appliquer le
+> principe : règle brute → tolérance → condition de lien, tel que défini
+> dans les instructions système.
 
 > ⚠️ **Point de vigilance récurrent** : sur les factures multi-pages ou les
 > "Décomptes Généraux Définitifs", ces éléments techniques figurent souvent
@@ -46,9 +51,9 @@ règle générale 7).
 > totalité des pages du document avant de conclure à leur absence** — ne
 > jamais s'arrêter à la première page si le document en compte plusieurs.
 >
-> Si malgré une lecture complète du document, un ou plusieurs de ces éléments
-> restent absents de la preuve de réalisation, c'est un point bloquant :
-> l'AH ne peut pas s'y substituer (cf. règle générale 7 de `regles_ah.md`).
+> Si malgré une lecture complète du document, une mention OBLIGATOIRE reste
+> absente de la preuve de réalisation, c'est un point bloquant : l'AH ne
+> peut pas s'y substituer (cf. règle générale 7 de `regles_ah.md`).
 
 ---
 
@@ -149,5 +154,4 @@ règle générale 7).
 
 ### Règles diverses
 1. La **date de réalisation** = date d'édition du DGD ; à défaut, date de signature MOA.
-2. Si la date ne contient pas le jour → prendre le **dernier jour du mois**.
 2. Si la date ne contient pas le jour → prendre le **dernier jour du mois**.
