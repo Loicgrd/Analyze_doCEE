@@ -37,12 +37,28 @@ Base-toi sur CETTE liste pour associer les travaux décrits dans les documents
 Tu es un expert CEE. On te donne des extraits de documents d'un dossier de travaux
 (facture, devis, DGD, ordre de service...).
 
-Ta mission : identifier la fiche BAR ou BAT applicable en te basant sur :
-1. Un code fiche explicitement écrit dans les documents (ex: "BAR-EN-105") si présent
-2. À défaut, la **nature réelle des travaux décrits** (matériaux, épaisseurs,
-   équipements, prestations facturées) mise en correspondance avec la
-   nomenclature officielle ci-dessous — c'est le cas le plus fréquent, les
-   documents mentionnent rarement le code fiche explicitement.
+Ta mission : identifier la fiche BAR ou BAT applicable en te basant EN PRIORITÉ
+sur la **nature réelle des travaux décrits sur la facture / DGD** (matériaux,
+épaisseurs, équipements, prestations facturées), mise en correspondance avec
+la nomenclature officielle ci-dessous.
+
+C'est la méthode principale, pas un repli : sur un marché de travaux normal,
+la facture ne mentionne QUASIMENT JAMAIS de code fiche explicite — seuls
+certains documents propres à des bailleurs sociaux (AH, VISA) le font, et pas
+systématiquement. Un dossier sans AH ni VISA doit être classifié avec la même
+fiabilité qu'un dossier qui en a, à partir du seul contenu de la facture.
+
+Un code fiche explicitement écrit quelque part (AH, VISA...) est un indice
+complémentaire utile, mais PAS une vérité à recopier aveuglément :
+- Le VISA porte parfois des mentions déclaratives non fiables. Cas connu :
+  le libellé "opération standardisée BAR-TH-130" est imprimé par défaut à
+  côté de la case "Construction d'un bâtiment neuf" sur certains modèles de
+  VISA, même quand cette case n'est PAS cochée (bâtiment existant). Si la
+  case "Bâtiment existant depuis plus de 2 ans" est cochée, IGNORE
+  totalement cette mention BAR-TH-130 — ce n'est pas une fiche du dossier.
+- Si un code trouvé sur l'AH/VISA ne correspond à AUCUN travail décrit sur
+  la facture, ne le retiens pas : la nature réelle des travaux facturés prime
+  toujours sur une mention déclarative isolée.
 {table_block}
 Réponds UNIQUEMENT en JSON valide, sans texte avant ou après, avec exactement ces clés :
 {{
@@ -95,10 +111,19 @@ def classify_dossier_ia(
     docs: Dict[str, dict],
     model: str = "claude-sonnet-4-6",
     correspondance_table: str = "",
-    max_chars_per_doc: int = 2500,
+    max_chars_per_doc: int = 6000,  # marge suffisante pour préserver 2-3 fiches via smart_truncate
+    max_chars_facture: int = 12000,  # budget élargi : c'est le document le plus fiable/descriptif
+    regex_hint: list = None,
 ) -> Dict:
     """
     Classification par IA — reconnaissance sémantique de la nature des travaux.
+
+    Priorité donnée à la FACTURE / DGD : c'est le document quasi toujours
+    présent dans un dossier CEE, et le plus descriptif des travaux réellement
+    réalisés (contrairement à l'AH ou au VISA, souvent absents ou porteurs de
+    mentions déclaratives peu fiables). Sur un marché normal, la facture ne
+    mentionne quasiment jamais de code fiche explicite -- c'est le texte
+    descriptif des prestations qu'il faut analyser sémantiquement.
 
     Utilise Sonnet par défaut : la tâche (repérer un panneau isolant au milieu
     d'une facture multi-lignes, distinguer les prestations) demande davantage
@@ -107,36 +132,68 @@ def classify_dossier_ia(
 
     Coût : ~0.01-0.02€ par dossier (vs ~0.001€ en Haiku) — reste marginal
     face au coût de l'analyse complète (~0.05€), pour un gain de fiabilité
-    important quand le code fiche n'est pas écrit explicitement.
+    important puisque c'est désormais le chemin par défaut, pas un fallback.
 
     Args:
         docs: dict {nom_fichier: {"text": str, "scanned": bool}}
         model: modèle à utiliser (Sonnet par défaut)
         correspondance_table: table fiche<->travaux (depuis RuleLoader), fortement
             recommandée pour éviter les hallucinations de code fiche
-        max_chars_per_doc: extrait par document (plus large qu'avant pour capter
-            les lignes techniques qui ne sont pas forcément en tête de document)
+        max_chars_per_doc: extrait par document autre que la facture
+        max_chars_facture: extrait pour la facture/DGD spécifiquement (plus
+            large, car c'est la source principale de détection sémantique)
+        regex_hint: codes fiche éventuellement repérés par le regex, fournis
+            comme SIMPLE INDICE à corroborer -- pas une vérité à copier telle
+            quelle (un VISA peut porter des mentions déclaratives fausses,
+            cf. le cas connu du libellé "BAR-TH-130" imprimé par défaut).
 
     Returns:
-        dict avec fiche, secteur, coup_de_pouce, type_engagement,
-              sous_traitance, confiance, raisonnement
+        dict avec fiches, secteur, coup_de_pouce, type_engagement,
+              sous_traitance, date_engagement, confiance, raisonnement
     """
     import anthropic
+    from utils.extractor import smart_truncate
+
+    # Priorité d'ordre et de budget : facture/DGD en premier avec un budget
+    # élargi, car c'est le document le plus fiable pour la détection sémantique.
+    FACTURE_KEYWORDS = ("facture", "dgd", "decompte", "décompte", "dgd", "situation")
+
+    def _is_facture(name: str) -> bool:
+        return any(kw in name.lower() for kw in FACTURE_KEYWORDS)
+
+    ordered_names = sorted(docs.keys(), key=lambda n: (not _is_facture(n), n))
 
     extraits = []
-    for name, doc in docs.items():
+    for name in ordered_names:
+        doc = docs[name]
         text = doc.get("text", "")
-        extrait = text[:max_chars_per_doc].strip()
+        budget = max_chars_facture if _is_facture(name) else max_chars_per_doc
+        extrait = smart_truncate(text, max_chars=budget).strip()
         if extrait:
-            extraits.append(f"[{name.upper()}]\n{extrait}")
+            tag = " (PROBABLE PREUVE DE RÉALISATION — priorité pour la détection sémantique)" if _is_facture(name) else ""
+            extraits.append(f"[{name.upper()}{tag}]\n{extrait}")
 
     if not extraits:
         return _fallback_classification()
 
+    hint_block = ""
+    if regex_hint:
+        hint_block = (
+            f"\n\nIndice (non fiable à lui seul, à corroborer) : une recherche automatique "
+            f"a repéré la présence textuelle du/des code(s) suivant(s) quelque part dans les "
+            f"documents : {', '.join(regex_hint)}. Vérifie s'ils correspondent réellement à des "
+            f"travaux décrits (notamment sur la facture), ou s'il s'agit d'une mention "
+            f"déclarative non fiable (VISA, AH) sans rapport avec les travaux effectifs."
+        )
+
     user_prompt = (
-        "Voici les extraits des documents du dossier CEE à classifier :\n\n"
+        "Voici les extraits des documents du dossier CEE à classifier. Analyse en "
+        "PRIORITÉ la nature des travaux décrits sur la facture/DGD (prestations, "
+        "matériaux, équipements facturés) : c'est la source la plus fiable, bien plus "
+        "que la présence ou l'absence d'un code fiche explicite ailleurs.\n\n"
         + "\n\n".join(extraits)
-        + "\n\nIdentifie la fiche BAR/BAT applicable et le contexte du dossier."
+        + hint_block
+        + "\n\nIdentifie la ou les fiche(s) BAR/BAT applicable(s) et le contexte du dossier."
     )
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
@@ -185,7 +242,8 @@ FICHE_PATTERNS = [
     (r"BAR-EN-103", "BAR-EN-103"), (r"BAR-EN-104", "BAR-EN-104"),
     (r"BAR-EN-105", "BAR-EN-105"), (r"BAR-EN-106", "BAR-EN-106"),
     (r"BAR-TH-104", "BAR-TH-104"), (r"BAR-TH-106", "BAR-TH-106"),
-    (r"BAR-TH-107", "BAR-TH-107"), (r"BAR-TH-112", "BAR-TH-112"),
+    (r"BAR-TH-107", "BAR-TH-107"), (r"BAR-TH-110", "BAR-TH-110"),
+    (r"BAR-TH-112", "BAR-TH-112"),
     (r"BAR-TH-113", "BAR-TH-113"), (r"BAR-TH-116", "BAR-TH-116"),
     (r"BAR-TH-127", "BAR-TH-127"), (r"BAR-TH-129", "BAR-TH-129"),
     (r"BAR-TH-130", "BAR-TH-130"), (r"BAR-TH-137", "BAR-TH-137"),
@@ -226,21 +284,41 @@ KEYWORD_TO_FICHE = {
 
 
 def classify_dossier_regex(docs: Dict[str, dict]) -> Dict:
-    """Classification par regex — ne fonctionne que si le code fiche est écrit
-    explicitement ou qu'un mot-clé générique évident est présent. Fallback uniquement."""
+    """Classification par regex — ne fonctionne que si le/les code(s) fiche sont
+    écrits explicitement ou qu'un mot-clé générique évident est présent. Fallback
+    uniquement. Détecte TOUS les codes fiche présents (dossier multi-fiches)."""
     full_text = " ".join(d.get("text", "") for d in docs.values())
     full_text_lower = full_text.lower()
 
-    fiche_detected = None
+    # Collecte TOUS les codes fiche explicitement présents dans le texte
+    # (dossier multi-fiches possible), pas seulement le premier trouvé.
+    fiches_detected = []
     for pattern, fiche_name in FICHE_PATTERNS:
-        if re.search(pattern, full_text, re.IGNORECASE):
-            fiche_detected = fiche_name
-            break
+        if re.search(pattern, full_text, re.IGNORECASE) and fiche_name not in fiches_detected:
+            fiches_detected.append(fiche_name)
 
-    if not fiche_detected:
+    # Exclusion connue : sur le modèle de VISA utilisé, "opération standardisée
+    # BAR-TH-130" est un libellé fixe imprimé à côté de la case "Construction
+    # d'un bâtiment neuf", PAS une fiche réellement déclarée pour le dossier —
+    # confirmé sur plusieurs dossiers réels (règle permanente, cf.
+    # regles_autres_documents.md). On l'exclut ici même au niveau du regex,
+    # avant que ce faux positif ne pollue le chargement des règles ou le
+    # comptage du nombre de fiches du dossier.
+    if "BAR-TH-130" in fiches_detected:
+        boilerplate_present = (
+            "opération standardisée bar-th-130" in full_text_lower
+            or "operation standardisee bar-th-130" in full_text_lower
+        )
+        batiment_existant = "bâtiment existant" in full_text_lower or "batiment existant" in full_text_lower
+        if boilerplate_present and batiment_existant:
+            fiches_detected.remove("BAR-TH-130")
+
+    via_pattern_explicite = bool(fiches_detected)
+
+    if not fiches_detected:
         for keyword, fiche_name in KEYWORD_TO_FICHE.items():
             if keyword in full_text_lower:
-                fiche_detected = fiche_name
+                fiches_detected.append(fiche_name)
                 break
 
     secteur = "BAT" if any(
@@ -249,21 +327,32 @@ def classify_dossier_regex(docs: Dict[str, dict]) -> Dict:
 
     date_engagement = _extract_date_engagement_regex(full_text)
 
+    if via_pattern_explicite:
+        confiance = "haute"
+        raisonnement = (f"{len(fiches_detected)} code(s) fiche trouvé(s) explicitement dans "
+                         f"les documents : {', '.join(fiches_detected)}.")
+    elif fiches_detected:
+        confiance = "moyenne"
+        raisonnement = ("Fiche déduite d'un mot-clé générique (aucun code explicite trouvé) "
+                         "— fiabilité moindre, vérification IA recommandée.")
+    else:
+        confiance = "faible"
+        raisonnement = "Aucun code fiche ni mot-clé générique identifiable dans les documents."
+
+    if not date_engagement:
+        raisonnement += (" Date d'engagement non détectée par regex : le filtrage de "
+                          "version de fiche par date sera dégradé (toutes les versions "
+                          "seront envoyées).")
+
     return {
-        "fiches": [fiche_detected] if fiche_detected else ["INCONNUE"],
+        "fiches": fiches_detected if fiches_detected else ["INCONNUE"],
         "secteur": secteur,
         "coup_de_pouce": any(k in full_text_lower for k in ["coup de pouce", "cdp", "charte"]),
         "type_engagement": _detect_engagement_type(full_text_lower),
         "sous_traitance": any(k in full_text_lower for k in ["sous-traitant", "dc4"]),
         "date_engagement": date_engagement,
-        "confiance": "moyenne",
-        "raisonnement": "Classification par regex (sans IA) — fiable seulement si le code "
-                         "fiche ou un mot-clé générique est explicitement écrit. Le regex ne "
-                         "détecte qu'UNE fiche à la fois : si le dossier en couvre plusieurs, "
-                         "utiliser la classification IA ou le mode manuel multi-fiches."
-                         + ("" if date_engagement else " Date d'engagement non détectée par "
-                            "regex : le filtrage de version de fiche par date sera dégradé "
-                            "(toutes les versions seront envoyées)."),
+        "confiance": confiance,
+        "raisonnement": raisonnement,
     }
 
 
@@ -275,11 +364,22 @@ def classify_dossier(
     """
     Point d'entrée principal.
 
-    Stratégie : essaye d'abord le regex (gratuit, instantané). S'il trouve un
-    code fiche explicite, on le garde tel quel (haute confiance, aucun coût).
-    Sinon, bascule sur la classification IA (Sonnet) qui raisonne sur la
-    nature des travaux — c'est le cas le plus fréquent en pratique, la
-    plupart des documents ne citent pas le code fiche.
+    Stratégie : l'IA (Sonnet) tourne PAR DÉFAUT dès qu'une clé API est
+    disponible — c'est elle qui fait la détection sémantique des travaux
+    décrits, en priorité sur la FACTURE / DGD (document quasi toujours
+    présent et descriptif), pas seulement sur l'AH ou le VISA (souvent
+    absents, ou porteurs de mentions déclaratives non fiables — cf. le cas
+    connu du libellé "BAR-TH-130" imprimé par défaut sur certains VISA).
+
+    Le regex ne sert plus de raccourci qui court-circuite l'IA : il reste
+    utile pour deux choses seulement :
+      1. Fournir un indice de corroboration passé à l'IA (codes explicites
+         repérés, à confirmer par elle, pas à prendre pour argent comptant) ;
+      2. Servir de fallback dégradé si aucune clé API n'est disponible.
+    La plupart des factures de marchés normaux ne mentionnent JAMAIS de code
+    fiche explicite — seuls certains documents de bailleurs sociaux (AH,
+    VISA) le font, et pas systématiquement. Se reposer sur le regex comme
+    méthode principale sous-détecterait donc la majorité des dossiers réels.
 
     Args:
         correspondance_table: table fiche<->travaux, à passer depuis
@@ -291,37 +391,26 @@ def classify_dossier(
             réellement les résultats (voir eval/run_eval.py --no-table).
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
-
     regex_result = classify_dossier_regex(docs)
-    single_fiche = regex_result["fiches"][0] if regex_result["fiches"] else "INCONNUE"
-    if single_fiche != "INCONNUE" and single_fiche in _known_fiches_from_patterns():
-        # Code fiche trouvé explicitement dans le texte -> fiable, pas besoin d'IA.
-        # Note : le regex ne peut confirmer qu'UNE fiche explicite à la fois. Si le
-        # dossier en contient réellement plusieurs, l'IA (appelée si confiance jugée
-        # insuffisante par l'utilisateur) ou le mode manuel doivent prendre le relai.
-        regex_result["confiance"] = "haute"
-        regex_result["raisonnement"] = ("Code fiche trouvé explicitement dans les documents. "
-                                          "Si le dossier couvre plusieurs fiches, vérifier "
-                                          "manuellement ou forcer le mode IA.")
-        return regex_result
 
     if not api_key:
         regex_result["raisonnement"] = (
-            "ANTHROPIC_API_KEY absent — fallback regex uniquement. "
-            "La nature des travaux n'a pas pu être analysée sémantiquement : "
-            "si aucun code fiche n'était écrit explicitement, ce résultat peut "
-            "être peu fiable. Envisager --fiche pour l'indiquer manuellement."
+            "ANTHROPIC_API_KEY absent — fallback regex uniquement, dégradé. "
+            "La nature des travaux n'a pas pu être analysée sémantiquement "
+            "sur la facture : seuls les codes fiche explicitement écrits "
+            "(rares dans les factures de marchés normaux) ont pu être "
+            "détectés. Résultat probablement incomplet. Envisager --fiche "
+            "pour l'indiquer manuellement, ou relancer avec une clé API."
         )
         return regex_result
 
     table_to_use = correspondance_table if use_correspondance_table else ""
-    result = classify_dossier_ia(docs, correspondance_table=table_to_use)
+    regex_hint = regex_result["fiches"] if regex_result["fiches"] != ["INCONNUE"] else []
+    result = classify_dossier_ia(
+        docs, correspondance_table=table_to_use, regex_hint=regex_hint
+    )
     result["_table_utilisee"] = bool(table_to_use)
     return result
-
-
-def _known_fiches_from_patterns() -> set:
-    return {name for _, name in FICHE_PATTERNS}
 
 
 _DATE_PATTERN = re.compile(r"(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})")
