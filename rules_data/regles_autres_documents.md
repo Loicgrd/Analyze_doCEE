@@ -4,13 +4,13 @@
 
 La demande de VISA permet d'extraire les éléments suivants d'un dossier ODICEE déjà créé (informations pas forcément visibles sur les documents marché) :
 
-1. **Numéro de dossier ODICEE** → info en-tête
+1. **Numéro de dossier ODICEE**
 2. **Nom de l'opération**
 3. **Liste des adresses**
 4. **Nombre de logements et logements conventionnés** → permet la vérification de la partie BS
-5. **Raison sociale du bailleur** → info en-tête
-6. **SIREN du bailleur** → info en-tête
-7. **Fiches à valoriser** → permet de remplir l'en-tête
+5. **Raison sociale du bailleur**
+6. **SIREN du bailleur**
+7. **Fiches à valoriser**
 
 > ⚠️ La fiche mentionnée sur le VISA est déclarative : elle doit être vérifiée contre la nature réelle des travaux. En cas d'incohérence, la fiche correspondant aux travaux réels prime et l'écart doit être signalé.
 
@@ -19,7 +19,6 @@ La demande de VISA permet d'extraire les éléments suivants d'un dossier ODICEE
 ## Déclaration de sous-traitance (DC4)
 
 ### Validité structurelle
-Le document doit contenir :
 1. La mention **"Déclaration de sous-traitance"**
 2. L'identification de **l'acheteur**
 3. L'identification du **titulaire du marché public**

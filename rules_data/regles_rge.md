@@ -4,11 +4,7 @@
 
 Un certificat de qualification RGE permet de vérifier si l'entreprise ayant réalisé des travaux énergétiques éligibles aux CEE est bien RGE **à date d'engagement** du dossier.
 
-**Organismes de certification utilisés :**
-- Qualibat
-- Qualifelec
-- Qualit'EnR (QualiPAC, Qualisol, Qualibois)
-- OPQIBI (pas pour le RGE)
+**Organismes de certification utilisés :** Qualibat, Qualifelec, Qualit'EnR (QualiPAC, Qualisol, Qualibois), OPQIBI.
 
 ---
 
@@ -36,7 +32,7 @@ Un certificat de qualification RGE permet de vérifier si l'entreprise ayant ré
 4. Les domaines RGE de travaux couverts
 
 ### Validité métier
-1. Mentionner un **domaine cohérent avec la fiche BAR** associée (cf. tableau des domaines RGE)
+1. Mentionner un **domaine cohérent avec la fiche BAR** associée
 2. Être **valable pour ce domaine à la date d'engagement** du dossier
 
 ---

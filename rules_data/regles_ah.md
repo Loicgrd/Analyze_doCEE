@@ -37,7 +37,7 @@ Elle est composée de **4 grandes parties** :
 1. **Mentionner le sous-traitant** si les travaux ont été réalisés par un sous-traitant
 
 ### Règles diverses
-1. Tout élément de la partie A doit correspondre aux éléments techniques de la preuve de réalisation (quantitatif, éléments techniques...).
+1. Tout élément de la partie A doit correspondre aux éléments techniques de la preuve de réalisation.
 
 ---
 
