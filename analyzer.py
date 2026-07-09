@@ -15,7 +15,7 @@ from utils.rule_loader import RuleLoader
 from utils.claude_client import analyze_with_claude, dry_run as run_dry_run
 
 
-def process_dossier(input_path: str, rules_dir: str, verbose: bool = False, dry_run: bool = False, fiche_override: str = None) -> dict:
+def process_dossier(input_path: str, rules_dir: str, verbose: bool = False, dry_run: bool = False, fiche_override: str = None, use_correspondance_table: bool = True) -> dict:
     input_path = Path(input_path)
     rules_dir = Path(rules_dir)
 
@@ -60,7 +60,10 @@ def process_dossier(input_path: str, rules_dir: str, verbose: bool = False, dry_
         correspondance_table = loader.get_fiche_correspondance_table()
 
         if fiche_override:
-            classification = classify_dossier(docs, correspondance_table=correspondance_table)
+            classification = classify_dossier(
+                docs, correspondance_table=correspondance_table,
+                use_correspondance_table=use_correspondance_table,
+            )
             classification["fiche"] = fiche_override
             classification["secteur"] = "BAT" if fiche_override.upper().startswith("BAT") else "BAR"
             classification["confiance"] = "haute"
@@ -68,7 +71,10 @@ def process_dossier(input_path: str, rules_dir: str, verbose: bool = False, dry_
             if verbose:
                 print(f"   → Fiche imposée manuellement : {fiche_override}")
         else:
-            classification = classify_dossier(docs, correspondance_table=correspondance_table)
+            classification = classify_dossier(
+                docs, correspondance_table=correspondance_table,
+                use_correspondance_table=use_correspondance_table,
+            )
             if verbose:
                 print(f"   → Fiche détectée : {classification['fiche']}")
                 print(f"   → Confiance      : {classification.get('confiance', '?')}")
@@ -107,12 +113,13 @@ def main():
     parser.add_argument("--output", default=None)
     parser.add_argument("--dry-run", action="store_true", help="Assemble le prompt sans appeler l'API (gratuit)")
     parser.add_argument("--fiche", default=None, help="Impose la fiche BAR/BAT (ex: BAR-EN-105), contourne la classification")
+    parser.add_argument("--no-table", action="store_true", help="Désactive la table de correspondance fiche<->travaux en classification IA (test A/B)")
     parser.add_argument("-v", "--verbose", action="store_true")
 
     args = parser.parse_args()
 
     try:
-        result = process_dossier(args.input, args.rules, verbose=args.verbose, dry_run=args.dry_run, fiche_override=args.fiche)
+        result = process_dossier(args.input, args.rules, verbose=args.verbose, dry_run=args.dry_run, fiche_override=args.fiche, use_correspondance_table=not args.no_table)
         output = json.dumps(result, ensure_ascii=False, indent=2)
 
         if args.output:
