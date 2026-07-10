@@ -78,7 +78,7 @@ python eval/run_eval.py --rules ./rules_data
 | Bloc | Contenu | Taille | Cache |
 |---|---|---|---|
 | Socle | 6 règles Doc en Markdown | ~6 500 tk | ✅ Caché (10% du tarif dès le 2e appel) |
-| Variable | Fiche BAR/BAT filtrée + documents du dossier | ~1 000 à 8 000 tk selon dossier | ❌ Plein tarif |
+| Variable | Fiche(s) filtrée(s) + documents INTÉGRAUX du dossier | ~2 000 à 15 000 tk selon dossier | ❌ Plein tarif |
 
 **Coût mesuré sur des dossiers réels : ~0,03 à 0,07 € par dossier.**
 
@@ -96,6 +96,29 @@ mentionne explicitement la fiche, la classification retourne "INCONNUE" —
 c'est un comportement volontaire (mieux vaut un statut explicite qu'une
 fiche devinée à tort). L'app et le CLI affichent une alerte visible dans ce
 cas, invitant à vérifier manuellement.
+
+## Couverture documentaire (nouveau)
+
+Chaque document est marqué dans le prompt **[DOCUMENT COMPLET]** ou
+**[EXTRAIT PARTIEL : ...]** (pages non OCRisées, texte tronqué). Claude a
+l'instruction explicite de ne JAMAIS conclure NON VALIDE sur la seule
+absence d'un élément dans un extrait partiel : il renseigne
+`hors_extrait_possible=true` sur l'élément, ajoute une anomalie, et tire le
+verdict vers INCOMPLET (vérification humaine du document original).
+L'app affiche une alerte dédiée listant ces éléments incertains.
+
+## Recoupement date d'engagement / version de fiche (nouveau)
+
+La date détectée par le classifier sélectionne la version de fiche chargée —
+si elle était fausse, les mauvais seuils seraient vérifiés. Trois garde-fous :
+1. Le prompt inclut désormais les **périodes d'application de TOUTES les
+   versions** de chaque fiche (quelques dizaines de tokens).
+2. Le schéma d'audit impose un champ `date_engagement_confirmee` : Claude
+   ré-identifie lui-même la date et vérifie qu'elle tombe dans la période de
+   la version chargée ; sinon, anomalie 'VERSION DE FICHE À REVÉRIFIER' et
+   statut au mieux INCOMPLET.
+3. L'app compare date classifier vs date audit et affiche une alerte rouge
+   en cas de divergence.
 
 
 ## Classification de la fiche — 3 modes

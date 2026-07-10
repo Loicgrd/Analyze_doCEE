@@ -9,7 +9,7 @@ import tempfile
 import argparse
 from pathlib import Path
 
-from utils.extractor import extract_zip, extract_text_from_pdf, is_scanned_pdf, ocr_pdf_smart
+from utils.extractor import extract_zip, extract_document
 from utils.classifier import classify_dossier
 from utils.rule_loader import RuleLoader
 from utils.claude_client import analyze_with_claude, dry_run as run_dry_run
@@ -41,17 +41,19 @@ def process_dossier(input_path: str, rules_dir: str, verbose: bool = False, dry_
             pdf_path = Path(pdf_path)
             name = pdf_path.stem.lower()
 
-            if is_scanned_pdf(pdf_path):
-                text = ocr_pdf_smart(pdf_path)
-                docs[name] = {"text": text, "scanned": True, "path": str(pdf_path)}
-            else:
-                text = extract_text_from_pdf(pdf_path)
-                docs[name] = {"text": text, "scanned": False, "path": str(pdf_path)}
+            # extract_document retourne texte + métadonnées de couverture
+            # (truncated, couverture, pages_ocr...) injectées ensuite dans le
+            # prompt d'audit pour que Claude distingue "absent du document"
+            # et "absent de l'extrait fourni".
+            docs[name] = extract_document(pdf_path)
 
             if verbose:
                 preview = docs[name]["text"][:80].replace("\n", " ")
                 scanned_tag = " [SCANNÉ]" if docs[name]["scanned"] else ""
-                print(f"   • {pdf_path.name}{scanned_tag}: {preview}...")
+                partial_tag = " [EXTRAIT PARTIEL]" if docs[name].get("truncated") else ""
+                print(f"   • {pdf_path.name}{scanned_tag}{partial_tag}: {preview}...")
+                if docs[name].get("couverture"):
+                    print(f"     ⚠️ {docs[name]['couverture']}")
 
         if verbose:
             print("[3/4] Classification du dossier...")

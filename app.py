@@ -167,7 +167,7 @@ if uploaded:
         if api_key:
             os.environ["ANTHROPIC_API_KEY"] = api_key
 
-        from utils.extractor import extract_zip, extract_text_from_pdf, is_scanned_pdf, ocr_pdf_smart, get_page_count
+        from utils.extractor import extract_zip, extract_document
         from utils.classifier import classify_dossier, classify_dossier_regex
         from utils.rule_loader import RuleLoader
         from utils.claude_client import analyze_with_claude, dry_run as run_dry_run
@@ -190,15 +190,17 @@ if uploaded:
                 for pdf_path in pdf_files:
                     pdf_path = Path(pdf_path)
                     name = pdf_path.stem.lower()
-                    scanned = is_scanned_pdf(pdf_path)
-                    if scanned:
-                        n_pages = get_page_count(pdf_path)
-                        text = ocr_pdf_smart(pdf_path)
-                        st.write(f"→ `{pdf_path.name}` — scanné, {n_pages} page(s), OCR intelligent (début + fin)")
+                    doc = extract_document(pdf_path)
+                    docs[name] = doc
+                    if doc["scanned"]:
+                        st.write(f"→ `{pdf_path.name}` — scanné, {doc.get('pages_total', '?')} page(s), OCR intelligent (début + fin)")
                     else:
-                        text = extract_text_from_pdf(pdf_path)
                         st.write(f"→ `{pdf_path.name}` — texte extrait")
-                    docs[name] = {"text": text, "scanned": scanned, "path": str(pdf_path)}
+                    if doc.get("couverture"):
+                        st.warning(f"`{pdf_path.name}` — couverture partielle : {doc['couverture']}. "
+                                   "Une absence d'élément dans ce document sera signalée comme "
+                                   "'possiblement hors extrait' (vérification manuelle recommandée), "
+                                   "pas comme une non-conformité définitive.", icon="⚠️")
 
                 status.update(label="📚 Chargement de la nomenclature…")
                 loader = RuleLoader(rules_path)
@@ -369,6 +371,40 @@ if uploaded:
             audit = result.get("audit", {})
 
             if audit:
+                # --- Recoupement date d'engagement : classifier vs audit ---
+                # Si la date confirmée par Claude pendant l'audit diffère de
+                # celle du classifier (qui a servi à filtrer la VERSION de
+                # fiche chargée), les seuils vérifiés proviennent peut-être de
+                # la mauvaise version -> alerte bloquante à vérifier.
+                date_classif = classification.get("date_engagement")
+                date_audit = audit.get("date_engagement_confirmee")
+                if date_audit and date_classif and date_audit != date_classif:
+                    st.error(
+                        f"🚨 Divergence de date d'engagement : le classifier a détecté "
+                        f"**{date_classif}** (date utilisée pour sélectionner la version de "
+                        f"fiche et ses seuils), mais l'audit a confirmé **{date_audit}** dans "
+                        f"les documents. La version de fiche vérifiée est peut-être la "
+                        f"mauvaise — relancer l'analyse en imposant la fiche/date, ou "
+                        f"vérifier manuellement.",
+                        icon="🚨",
+                    )
+                elif date_audit and not date_classif:
+                    st.warning(
+                        f"ℹ️ L'audit a identifié la date d'engagement **{date_audit}** alors "
+                        f"que le classifier n'en avait trouvé aucune (toutes les versions de "
+                        f"fiche ont été envoyées) : vérifier dans le détail que la bonne "
+                        f"version a été retenue (champ « version_applicable »).",
+                        icon="⚠️",
+                    )
+
+                if result.get("reponse_tronquee"):
+                    st.error(
+                        "🚨 La réponse de l'API a été tronquée (limite de tokens atteinte "
+                        "malgré une relance) — le résultat ci-dessous est incomplet, "
+                        "relancer l'analyse.",
+                        icon="🚨",
+                    )
+
                 # --- Synthèse narrative (lecture humaine rapide) ---
                 if audit.get("synthese_narrative"):
                     st.info(audit["synthese_narrative"], icon="📝")
@@ -393,7 +429,12 @@ if uploaded:
                             for el in elements:
                                 conforme = el.get("conforme")
                                 conforme_str = "✅" if conforme is True else ("❌" if conforme is False else "—")
-                                present_str = "✅" if el.get("present") else "❌"
+                                if el.get("present"):
+                                    present_str = "✅"
+                                elif el.get("hors_extrait_possible"):
+                                    present_str = "❓ hors extrait ?"
+                                else:
+                                    present_str = "❌"
                                 verif = el.get("citation_verifiee")
                                 verif_str = "✅" if verif is True else ("⚠️ NON TROUVÉE" if verif is False else "—")
                                 rows.append({
@@ -406,6 +447,15 @@ if uploaded:
                                     "Source": el.get("source") or "—",
                                 })
                             st.dataframe(rows, use_container_width=True, hide_index=True)
+                            n_hors_extrait = sum(1 for el in elements if el.get("hors_extrait_possible"))
+                            if n_hors_extrait:
+                                st.warning(
+                                    f"❓ {n_hors_extrait} élément(s) introuvable(s) dans un document à "
+                                    f"couverture PARTIELLE (pages non OCRisées ou texte tronqué) : leur "
+                                    f"absence n'est pas certaine — vérifier le document original avant "
+                                    f"de conclure à une non-conformité.",
+                                    icon="⚠️",
+                                )
                             n_non_verifiees = sum(1 for el in elements if el.get("citation_verifiee") is False)
                             if n_non_verifiees:
                                 st.error(
