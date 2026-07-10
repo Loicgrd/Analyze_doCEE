@@ -372,8 +372,11 @@ class RuleLoader:
 
     @staticmethod
     def _format_xlsx_rows(rows) -> str:
-        """Formate les lignes du référentiel Excel en Markdown lisible."""
+        """Formate les lignes du référentiel Excel en Markdown lisible.
+        Injecte aussi la checklist des champs atomiques (technical_schema)
+        pour guider la réponse structurée de l'appel d'audit."""
         import pandas as pd
+        from utils.technical_schema import build_fields_checklist_text
 
         blocks = []
         for _, row in rows.iterrows():
@@ -395,10 +398,26 @@ class RuleLoader:
                 ("ELIGIBILITE AUX CONTROLES\n(Date d'engagement)", "**Éligibilité aux contrôles**"),
                 ("FICHES\nINCOMPATIBILITE ", "**Fiches incompatibles**"),
             ]
+            mentions_obligatoires_raw = None
+            mentions_necessaires_raw = None
             for col, label in field_labels:
                 val = row.get(col)
                 if pd.notna(val) and str(val).strip():
                     lines.append(f"{label} :\n{str(val).strip()}")
+                    if col == "MENTIONS OBLIGATOIRES SUR LA PREUVE DE REALISATION":
+                        mentions_obligatoires_raw = str(val).strip()
+                    elif col == "MENTION NON OBLIGATOIRE SUR LA PREUVE DE REALISAITON MAIS NECESSAIRE":
+                        mentions_necessaires_raw = str(val).strip()
+
+            if mentions_obligatoires_raw:
+                checklist = build_fields_checklist_text(mentions_obligatoires_raw, severite="obligatoire")
+                if checklist:
+                    lines.append(checklist)
+
+            if mentions_necessaires_raw:
+                checklist_necessaire = build_fields_checklist_text(mentions_necessaires_raw, severite="necessaire")
+                if checklist_necessaire:
+                    lines.append(checklist_necessaire)
 
             blocks.append("\n".join(lines))
 

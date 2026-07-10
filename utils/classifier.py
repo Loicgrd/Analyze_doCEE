@@ -246,7 +246,7 @@ FICHE_PATTERNS = [
     (r"BAR-TH-112", "BAR-TH-112"),
     (r"BAR-TH-113", "BAR-TH-113"), (r"BAR-TH-116", "BAR-TH-116"),
     (r"BAR-TH-127", "BAR-TH-127"), (r"BAR-TH-129", "BAR-TH-129"),
-    (r"BAR-TH-130", "BAR-TH-130"), (r"BAR-TH-137", "BAR-TH-137"),
+    (r"BAR-TH-137", "BAR-TH-137"),
     (r"BAR-TH-143", "BAR-TH-143"), (r"BAR-TH-148", "BAR-TH-148"),
     (r"BAR-TH-159", "BAR-TH-159"), (r"BAR-TH-164", "BAR-TH-164"),
     (r"BAR-TH-169", "BAR-TH-169"), (r"BAR-TH-174", "BAR-TH-174"),
@@ -297,21 +297,14 @@ def classify_dossier_regex(docs: Dict[str, dict]) -> Dict:
         if re.search(pattern, full_text, re.IGNORECASE) and fiche_name not in fiches_detected:
             fiches_detected.append(fiche_name)
 
-    # Exclusion connue : sur le modèle de VISA utilisé, "opération standardisée
-    # BAR-TH-130" est un libellé fixe imprimé à côté de la case "Construction
-    # d'un bâtiment neuf", PAS une fiche réellement déclarée pour le dossier —
-    # confirmé sur plusieurs dossiers réels (règle permanente, cf.
-    # regles_autres_documents.md). On l'exclut ici même au niveau du regex,
-    # avant que ce faux positif ne pollue le chargement des règles ou le
-    # comptage du nombre de fiches du dossier.
-    if "BAR-TH-130" in fiches_detected:
-        boilerplate_present = (
-            "opération standardisée bar-th-130" in full_text_lower
-            or "operation standardisee bar-th-130" in full_text_lower
-        )
-        batiment_existant = "bâtiment existant" in full_text_lower or "batiment existant" in full_text_lower
-        if boilerplate_present and batiment_existant:
-            fiches_detected.remove("BAR-TH-130")
+    # Note : "BAR-TH-130" est volontairement absent de FICHE_PATTERNS ci-dessus
+    # et ne peut donc jamais être auto-détecté par regex. Sur le modèle de VISA
+    # utilisé, "opération standardisée BAR-TH-130" est un libellé fixe imprimé
+    # par défaut à côté de la case "Construction d'un bâtiment neuf", jamais
+    # une fiche réellement déclarée pour le dossier (confirmé sur plusieurs
+    # dossiers réels) — règle permanente, cf. regles_autres_documents.md.
+    # Seul un mode manuel explicite (--fiche BAR-TH-130) permet de l'utiliser,
+    # pour le cas rare et légitime d'un dossier réellement en construction neuve.
 
     via_pattern_explicite = bool(fiches_detected)
 

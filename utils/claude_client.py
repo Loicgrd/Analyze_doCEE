@@ -1,9 +1,17 @@
 """
-Client API Claude pour l'analyse CEE — avec prompt caching + mode dry-run.
+Client API Claude pour l'analyse CEE — sortie structurée (tool use) + prompt caching + mode dry-run.
 
 Architecture du prompt :
   [system + socle de règles MD]  ← bloc STABLE, marqué cache_control
   [fiche filtrée + docs dossier] ← bloc VARIABLE
+
+Architecture de la réponse :
+  Le schéma JSON de l'outil "produire_audit_cee" est FIXE et universel (ne
+  change jamais d'un appel à l'autre). Ce qui varie par fiche, c'est le
+  contenu du prompt (checklist des champs atomiques attendus, générée par
+  utils/technical_schema.py et injectée via rule_loader) — pas la forme du
+  schéma JSON lui-même. Claude est contraint via tool_choice à produire
+  cette structure, éliminant le parsing fragile de Markdown par regex/split.
 
 Mode dry-run : assemble le prompt complet SANS appeler l'API.
 Permet de vérifier gratuitement que l'extraction, la classification et le
@@ -12,11 +20,157 @@ chargement des règles fonctionnent avant de payer un vrai appel.
 
 import os
 import time
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import anthropic
 
 from utils.extractor import smart_truncate
+
+
+# ---------------------------------------------------------------------------
+# SCHÉMA FIXE de l'outil d'audit — ne varie jamais selon la fiche ou le
+# dossier. Le détail de CE QUI doit être vérifié (quels champs atomiques,
+# quelles conditions techniques) vient du PROMPT, pas de ce schéma.
+# ---------------------------------------------------------------------------
+
+_VERDICT_ENUM = ["VALIDE", "NON VALIDE", "INCOMPLET"]
+
+_ELEMENT_TECHNIQUE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "champ": {
+            "type": "string",
+            "description": ("Nom du champ atomique (utiliser exactement le nom donné dans la "
+                             "checklist de la fiche, ex: 'marque_reference', 'etas_pourcent'), "
+                             "ou le libellé exact de l'exigence si elle ne correspond à aucun "
+                             "champ standard (section 'elements_specifiques' de la checklist)."),
+        },
+        "present": {
+            "type": "boolean",
+            "description": "L'élément est-il présent sur la preuve de réalisation ?",
+        },
+        "valeur_trouvee": {
+            "type": ["string", "null"],
+            "description": "Valeur exacte (marque, référence, R, etc.) telle qu'elle apparaît dans le document, null si absent.",
+        },
+        "citation_verbatim": {
+            "type": ["string", "null"],
+            "description": (
+                "OBLIGATOIRE si present=true : la ligne ou phrase COMPLÈTE du document "
+                "d'où provient valeur_trouvee, copiée mot pour mot (pas reformulée, pas "
+                "résumée). Cette citation doit porter en elle-même de quoi vérifier que "
+                "la valeur concerne bien LE BON composant/équipement -- pas juste que la "
+                "valeur existe quelque part dans le document. Ex: si tu extrais une marque "
+                "pour un isolant, cite la ligne qui mentionne explicitement l'isolant "
+                "('Marque : URSA' seul ne suffit pas si la ligne ne précise pas de quoi il "
+                "s'agit -- inclus le titre de section ou la mention du composant juste "
+                "avant/après si nécessaire pour que la citation soit auto-suffisante)."
+            ),
+        },
+        "conforme": {
+            "type": ["boolean", "null"],
+            "description": ("Conforme au seuil minimum de la fiche (ex: R trouvé >= R minimum "
+                             "requis) ? null si non applicable ou non évaluable (ex: simple "
+                             "présence d'une marque, pas de seuil à comparer)."),
+        },
+        "source": {
+            "type": ["string", "null"],
+            "description": "Document et emplacement (ex: 'Facture p.4, annexe technique, section isolation combles').",
+        },
+    },
+    "required": ["champ", "present"],
+}
+
+_CONTROLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "item": {"type": "string", "description": "Intitulé du point de contrôle vérifié."},
+        "verdict": {"type": "boolean", "description": "Ce point de contrôle est-il satisfait ?"},
+        "details": {"type": ["string", "null"], "description": "Précision courte si utile (valeur trouvée, écart constaté...)."},
+        "source": {"type": ["string", "null"], "description": "Document source justifiant le verdict."},
+    },
+    "required": ["item", "verdict"],
+}
+
+_AXE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": _VERDICT_ENUM},
+        "controles": {
+            "type": "array",
+            "items": _CONTROLE_SCHEMA,
+            "description": "Liste des points de contrôle vérifiés pour cet axe.",
+        },
+    },
+    "required": ["verdict", "controles"],
+}
+
+AUDIT_TOOL_SCHEMA = {
+    "name": "produire_audit_cee",
+    "description": ("Produit le résultat structuré de l'audit de conformité d'un dossier CEE. "
+                     "Doit être appelé une seule fois, à la fin de l'analyse complète."),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "fiches": {
+                "type": "array",
+                "description": "Une entrée par fiche BAR/BAT applicable au dossier (plusieurs si dossier multi-fiches).",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string", "description": "Code fiche, ex: BAR-EN-105"},
+                        "version_applicable": {"type": "string", "description": "Version retenue, ex: A54.5, avec la date d'engagement qui justifie ce choix."},
+                        "elements_techniques": {
+                            "type": "array",
+                            "items": _ELEMENT_TECHNIQUE_SCHEMA,
+                            "description": "Un objet par champ de la checklist fournie dans le prompt pour cette fiche, plus les éléments spécifiques.",
+                        },
+                        "verdict_technique": {"type": "string", "enum": _VERDICT_ENUM},
+                    },
+                    "required": ["code", "elements_techniques", "verdict_technique"],
+                },
+            },
+            "axes": {
+                "type": "object",
+                "description": "Les axes de validation globale du dossier (Temps 2 du processus d'audit).",
+                "properties": {
+                    "logique_globale": _AXE_SCHEMA,
+                    "engagement": _AXE_SCHEMA,
+                    "realisation_documentaire": {
+                        **_AXE_SCHEMA,
+                        "description": "Validité structurelle/métier du document de réalisation (hors éligibilité technique, déjà couverte dans fiches[].elements_techniques).",
+                    },
+                    "rge": _AXE_SCHEMA,
+                    "ah": _AXE_SCHEMA,
+                    "coherence": {
+                        **_AXE_SCHEMA,
+                        "description": "Cohérence engagement <-> réalisation (lien fort : numéro marché+adresse OU prix HT).",
+                    },
+                    "documents_annexes": _AXE_SCHEMA,
+                },
+                "required": ["logique_globale", "engagement", "realisation_documentaire", "rge", "ah", "coherence"],
+            },
+            "anomalies": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": ("Anomalies signalées mais non bloquantes (ex: écart de numéro de "
+                                 "dossier ODICEE, mention VISA à corriger). NE PAS inclure la "
+                                 "mention BAR-TH-130 liée à la case 'bâtiment neuf' non cochée "
+                                 "(faux positif connu, à ignorer totalement, cf. règles fournies)."),
+            },
+            "statut_global": {
+                "type": "string",
+                "enum": _VERDICT_ENUM,
+                "description": "Un seul axe ou une seule fiche NON VALIDE => dossier NON VALIDE. Un élément manquant sans non-conformité => INCOMPLET.",
+            },
+            "synthese_narrative": {
+                "type": "string",
+                "description": "Résumé libre de 4 à 8 phrases pour une lecture humaine rapide : fiche(s), verdict global, points bloquants principaux.",
+            },
+        },
+        "required": ["fiches", "axes", "statut_global", "synthese_narrative"],
+    },
+}
 
 
 _SYSTEM_INSTRUCTIONS = """
@@ -34,19 +188,21 @@ spécialisé dans l'analyse de conformité des dossiers réglementaires.
    sur la version correspondant à cette date. S'il indique "TOUTES VERSIONS" (date non
    déterminée automatiquement) ou "AMBIGU" (plusieurs versions se chevauchent sur cette
    date), c'est à TOI de trancher explicitement quelle version s'applique à partir de la
-   date d'engagement que tu identifies dans les documents, et de le justifier.
-3. Vérifier que TOUS les éléments techniques minimums de cette version précise de la
-   fiche (résistance thermique, efficacité, puissance, ΔT, marque, référence, surface,
-   quantité, certification produit...) sont présents ET conformes sur la PREUVE DE
-   RÉALISATION elle-même (jamais uniquement sur l'AH — voir règle générale de
-   `regles_ah.md`). Lire l'intégralité du document, y compris les annexes techniques
+   date d'engagement que tu identifies dans les documents, et de le justifier dans
+   "version_applicable". Si aucune date d'engagement n'est identifiable nulle part dans
+   les documents, retiens la version la PLUS RÉCENTE disponible par défaut, et
+   signale-le explicitement dans les anomalies.
+3. Pour chaque fiche, remplir "elements_techniques" en suivant EXACTEMENT la checklist
+   de champs atomiques fournie dans le bloc de règles de cette fiche (noms de champs
+   imposés). Vérifier que chaque élément est présent ET conforme au seuil minimum sur
+   la PREUVE DE RÉALISATION elle-même (jamais uniquement sur l'AH — voir règle générale
+   de `regles_ah.md`). Lire l'intégralité du document, y compris les annexes techniques
    multi-pages qui accompagnent souvent une facture ou un DGD.
 
 ## Temps 2 — Les règles de validation globales
 Une fois le cœur technique établi, vérifier la cohérence et la conformité de
-l'ensemble du dossier selon TOUTES les règles de validation fournies : validité
-structurelle et métier de chaque document (engagement, réalisation, RGE, AH),
-cohérence entre documents (liens forts), documents annexes requis, etc.
+l'ensemble du dossier selon TOUTES les règles de validation fournies, en
+remplissant chaque axe de "axes" avec ses points de contrôle ("controles").
 Un dossier peut avoir un cœur technique parfaitement valide et être NON VALIDE
 ou INCOMPLET à cause d'un défaut sur ces règles de validation (document manquant,
 signature absente, incohérence de prix...), et inversement.
@@ -54,46 +210,63 @@ signature absente, incohérence de prix...), et inversement.
 # RÈGLES DE CONTRÔLE PAR POINT
 Pour chaque point de contrôle :
 1. RÈGLE BRUTE : quelle est l'exigence de base (règles fournies) ?
-2. EXCEPTION / TOLÉRANCE : une alternative est-elle prévue par les règles ?
+2. EXCEPTION / TOLÉRANCE : une alternative est-elle prévue par les règles (logique "OU") ?
 3. CONDITION DE LIEN : quelle condition stricte rend l'alternative recevable ?
 
+# DISTINCTION OBLIGATOIRE / NÉCESSAIRE (IMPORTANT)
+Chaque fiche fournit deux listes d'éléments techniques distinctes :
+- **Champs OBLIGATOIRES** : leur absence sur la preuve de réalisation rend
+  cet élément non conforme (present=false), potentiellement bloquant pour
+  le verdict technique de la fiche.
+- **Champs NÉCESSAIRES (non obligatoires sur la preuve de réalisation)** :
+  leur absence sur la preuve de réalisation NE rend PAS ce document non
+  conforme en tant que tel — mais l'information reste OBLIGATOIRE pour
+  juger le DOSSIER dans son ensemble pleinement conforme. Cherche ces
+  éléments partout dans le dossier (facture, annexe technique, AH...) avant
+  de les déclarer absents. S'ils sont réellement introuvables nulle part
+  dans le dossier, ne les ignore JAMAIS silencieusement au prétexte que la
+  colonne source n'est pas "obligatoire" : signale l'absence (present=false)
+  et reflète-la dans le verdict technique de la fiche (typiquement INCOMPLET
+  plutôt que NON VALIDE, sauf si les règles de la fiche indiquent le contraire).
+
 # RÈGLES DE CITATION
-- Chaque point bloquant DOIT citer le document source du dossier qui le justifie.
-- Cite le nom exact des fichiers de règles entre parenthèses.
-- Ne jamais inventer une règle : si non couvert, écris
-  "Les documents fournis ne permettent pas de statuer sur ce cas."
+- Chaque contrôle non satisfait DOIT préciser sa source dans le champ "source"
+  ou "details" (document + emplacement).
+- Ne jamais inventer une valeur : si une information est absente, mets "present": false
+  et "valeur_trouvee": null plutôt que d'improviser une valeur plausible.
+- Pour chaque "elements_techniques" avec present=true, remplis "citation_verbatim"
+  avec la ligne exacte du document (copiée mot pour mot). Le risque principal
+  n'est PAS d'inventer une valeur qui n'existe nulle part -- c'est de prendre
+  une valeur RÉELLE mais qui concerne un AUTRE poste que celui demandé.
+  Exemple concret : sur une facture d'isolation, la ligne "Marque : XYZ" peut
+  concerner l'enduit, la colle, les fixations, le pare-vapeur ou le panneau
+  isolant lui-même selon sa position dans la facture -- vérifie TOUJOURS le
+  titre de section ou la ligne de désignation juste avant pour confirmer à
+  quel composant la valeur se rapporte réellement, avant de l'attribuer au
+  champ atomique concerné. Une facture multi-lignes (ITE, VMC, chauffage...)
+  contient presque toujours plusieurs marques/références différentes pour
+  des composants différents (isolant, treillis, colle, régulateur, caisson,
+  bouches...) -- ne jamais prendre la première valeur du bon TYPE rencontrée
+  sans vérifier qu'elle concerne le bon COMPOSANT.
 
 # ATTENTION PARTICULIÈRE
 - La fiche mentionnée sur le VISA est déclarative : vérifie qu'elle correspond
-  à la nature réelle des travaux. En cas d'écart, signale-le comme anomalie.
+  à la nature réelle des travaux. Le libellé "BAR-TH-130" imprimé par défaut à
+  côté de la case "Construction d'un bâtiment neuf" (non cochée) est un FAUX
+  POSITIF CONNU — ne jamais le retenir comme fiche ni le lister en anomalie.
 - Une preuve de réalisation doit être un document FINAL (solde, DGD, facture
   finale). Les situations/acomptes partiels ne sont PAS conformes, sauf
   situation de solde à 100% identifiable comme dernier document du marché.
 - Distingue PRGE et RGE complet sur les certificats Qualifelec.
 - Le délai engagement → réalisation ne doit pas dépasser 12 mois (alerte non
-  bloquante dès 10 mois).
+  bloquante dès 10 mois, à mettre dans "anomalies" si applicable).
 - Les éléments techniques de l'engagement ne valident jamais l'éligibilité
   technique, SAUF un devis dans un montage "devis + PV de réception".
 
-# FORMAT DE RÉPONSE OBLIGATOIRE
-## FICHE APPLICABLE
-[Fiche + justification]
-
-## 1. LOGIQUE GLOBALE (documents présents/manquants)
-## 2. VALIDATION ENGAGEMENT
-## 3. VALIDATION RÉALISATION (dont éligibilité technique de la fiche)
-## 4. VALIDATION RGE
-## 5. VALIDATION AH
-## 6. VALIDATION COHÉRENCE (liens engagement ↔ réalisation)
-## 7. DOCUMENTS ANNEXES (si exigés par la fiche)
-
-Pour chaque axe : verdict VALIDE / NON VALIDE / INCOMPLET
-+ liste des éléments non valides ou manquants avec le document source cité.
-
-## STATUT GLOBAL
-VALIDE / NON VALIDE / INCOMPLET
-(un seul axe non valide => dossier NON VALIDE ;
- un élément manquant sans non-conformité => INCOMPLET)
+# SORTIE
+Termine TOUJOURS ton analyse par UN SEUL appel à l'outil "produire_audit_cee"
+avec le résultat structuré complet. Ne produis pas de texte libre en dehors
+de cet appel d'outil.
 """.strip()
 
 
@@ -123,7 +296,7 @@ def build_prompt(
         + (variable_rules_text or "(aucune)")
         + "\n\n" + context_info
         + "\n\n" + docs_text
-        + "\n\nProcède à l'audit complet selon le format imposé."
+        + "\n\nProcède à l'audit complet et appelle l'outil produire_audit_cee avec le résultat structuré."
     )
 
     return {
@@ -142,6 +315,10 @@ def dry_run(
     """
     Assemble le prompt SANS appeler l'API. Gratuit.
     Retourne le prompt complet + une estimation de tokens et de coût.
+    Note : l'appel réel utilise une sortie structurée (tool use, schéma
+    AUDIT_TOOL_SCHEMA) plutôt qu'un texte libre — l'estimation d'output ici
+    reste approximative (le JSON structuré peut être plus ou moins verbeux
+    que la prose selon le nombre de fiches et de contrôles à documenter).
     """
     prompt = build_prompt(docs, core_rules_text, variable_rules_text, classification)
 
@@ -152,13 +329,18 @@ def dry_run(
     system_tk = system_chars // 4
     core_tk = core_chars // 4
     var_tk = var_chars // 4
-    total_input_tk = system_tk + core_tk + var_tk
+    # Le schéma de l'outil est envoyé à chaque appel comme les autres blocs input.
+    schema_tk = len(str(AUDIT_TOOL_SCHEMA)) // 4
+    total_input_tk = system_tk + core_tk + var_tk + schema_tk
 
     # Estimation coût — 1er appel (cache write) vs appels suivants (cache read)
+    # Le schéma de l'outil n'est pas mis en cache (pas marqué cache_control).
     cost_first_usd = (total_input_tk * 3) / 1_000_000
-    cost_cached_usd = ((system_tk + core_tk) * 0.3 + var_tk * 3) / 1_000_000
-    # + estimation output ~2000 tk
-    output_tk_est = 2000
+    cost_cached_usd = ((system_tk + core_tk) * 0.3 + (var_tk + schema_tk) * 3) / 1_000_000
+    # Sortie structurée généralement un peu plus dense que la prose équivalente,
+    # et proportionnelle au nombre de fiches détectées.
+    n_fiches = max(1, len(classification.get("fiches", ["1"])))
+    output_tk_est = 1800 + n_fiches * 700
     cost_first_usd += (output_tk_est * 15) / 1_000_000
     cost_cached_usd += (output_tk_est * 15) / 1_000_000
 
@@ -166,10 +348,12 @@ def dry_run(
         "prompt_system": prompt["system"],
         "prompt_core": prompt["core_block"],
         "prompt_variable": prompt["variable_block"],
+        "schema_outil": AUDIT_TOOL_SCHEMA,
         "tokens_estimation": {
             "system": system_tk,
             "core_socle": core_tk,
             "variable": var_tk,
+            "schema_outil": schema_tk,
             "total_input": total_input_tk,
             "output_estime": output_tk_est,
         },
@@ -189,10 +373,17 @@ def analyze_with_claude(
     variable_rules_text: str = None,
     verbose: bool = False,
     model: str = "claude-sonnet-4-6",
-    max_tokens: int = 3000,
+    max_tokens: int = 6000,
     api_key: str = None,
 ) -> Dict[str, Any]:
-    """Appelle l'API Claude avec prompt caching sur le socle de règles."""
+    """
+    Appelle l'API Claude avec prompt caching sur le socle de règles, et
+    contraint la réponse au schéma structuré AUDIT_TOOL_SCHEMA via tool_choice.
+
+    max_tokens relevé par rapport à l'ancien format prose (3000 -> 6000) :
+    la sortie JSON structurée d'un dossier multi-fiches peut être plus
+    volumineuse (plusieurs objets fiches + tous les axes détaillés).
+    """
     client = anthropic.Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
     classification = classification or {}
 
@@ -222,6 +413,7 @@ def analyze_with_claude(
         est = (len(prompt["system"]) + len(prompt["core_block"]) + len(prompt["variable_block"])) // 4
         print(f"   → Estimation tokens envoyés : ~{est:,}")
 
+    response = None
     for attempt in range(3):
         try:
             response = client.messages.create(
@@ -233,6 +425,8 @@ def analyze_with_claude(
                     "cache_control": {"type": "ephemeral"},
                 }],
                 messages=[{"role": "user", "content": user_content}],
+                tools=[AUDIT_TOOL_SCHEMA],
+                tool_choice={"type": "tool", "name": "produire_audit_cee"},
             )
             break
         except anthropic.RateLimitError:
@@ -241,12 +435,15 @@ def analyze_with_claude(
             else:
                 raise
 
-    analyse_text = response.content[0].text
+    audit_data = _extract_tool_use(response)
+    if audit_data:
+        audit_data = verify_citations(audit_data, docs)
     usage = response.usage
 
     return {
-        "analyse": analyse_text,
-        "statut": _extract_statut(analyse_text),
+        "audit": audit_data,
+        "statut": audit_data.get("statut_global", "INDÉTERMINÉ") if audit_data else "INDÉTERMINÉ",
+        "analyse": audit_data.get("synthese_narrative", "") if audit_data else "",
         "tokens_used": {
             "input": usage.input_tokens,
             "output": usage.output_tokens,
@@ -255,6 +452,69 @@ def analyze_with_claude(
             "total": usage.input_tokens + usage.output_tokens,
         },
     }
+
+
+def _extract_tool_use(response) -> Dict[str, Any]:
+    """
+    Extrait le contenu structuré du bloc tool_use de la réponse API.
+    Avec tool_choice forcé, ce bloc est garanti présent en usage normal ;
+    on reste défensif (dossier vide) en cas de réponse inattendue (ex:
+    troncature par max_tokens atteint avant la fin de l'appel d'outil).
+    """
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and block.name == "produire_audit_cee":
+            return block.input
+    return {}
+
+
+def verify_citations(audit_data: Dict[str, Any], docs: Dict[str, dict]) -> Dict[str, Any]:
+    """
+    Vérification a posteriori, sans appel API supplémentaire (coût nul) : pour
+    chaque élément technique avec present=true, contrôle que "citation_verbatim"
+    apparaît réellement (avec une tolérance sur les espaces/ponctuation) dans
+    le texte d'un des documents envoyés à Claude.
+
+    Portée réelle de cette vérification : elle détecte une citation FABRIQUÉE
+    (qui n'existe nulle part dans les documents) -- pas une MAUVAISE
+    ATTRIBUTION (citation réelle mais rattachée au mauvais composant). Ce
+    deuxième risque, plus fréquent en pratique, reste à la charge du prompt
+    (voir _SYSTEM_INSTRUCTIONS) et d'une relecture humaine de la citation
+    affichée dans l'app -- cette fonction est un filet de sécurité
+    complémentaire, pas une garantie de justesse d'attribution.
+
+    Ajoute un champ "citation_verifiee": bool sur chaque élément technique
+    et ne modifie rien d'autre (n'écrase aucune donnée, ne bloque rien).
+    """
+    import re as _re
+
+    def _normalise(s: str) -> str:
+        return _re.sub(r"\s+", " ", s.lower().strip())
+
+    full_corpus = _normalise(" ".join(d.get("text", "") for d in docs.values()))
+
+    for fiche_obj in audit_data.get("fiches", []):
+        for el in fiche_obj.get("elements_techniques", []):
+            citation = el.get("citation_verbatim")
+            if not el.get("present") or not citation:
+                el["citation_verifiee"] = None  # non applicable
+                continue
+            citation_norm = _normalise(citation)
+            # Tolérance : cherche la citation, ou au moins sa moitié la plus
+            # longue si l'OCR/l'extraction a pu introduire de petites erreurs.
+            if citation_norm in full_corpus:
+                el["citation_verifiee"] = True
+            else:
+                # Repli tolérant : découpe en mots et vérifie qu'une bonne
+                # proportion (80%) des mots de la citation apparaît dans le
+                # corpus, dans le désordre (tolère les erreurs OCR mineures).
+                mots = [w for w in citation_norm.split() if len(w) > 2]
+                if mots:
+                    trouves = sum(1 for w in mots if w in full_corpus)
+                    el["citation_verifiee"] = (trouves / len(mots)) >= 0.8
+                else:
+                    el["citation_verifiee"] = False
+
+    return audit_data
 
 
 def _build_docs_section(docs: Dict[str, dict]) -> str:
@@ -269,16 +529,3 @@ def _build_docs_section(docs: Dict[str, dict]) -> str:
         text = smart_truncate(text, max_chars=10000)
         parts.append(f"\n--- {name.upper()}{scanned} ---\n{text}")
     return "\n".join(parts)
-
-
-def _extract_statut(analyse_text: str) -> str:
-    text_upper = analyse_text.upper()
-    idx = text_upper.find("STATUT GLOBAL")
-    window = text_upper[idx:idx + 300] if idx != -1 else text_upper
-    if "NON VALIDE" in window:
-        return "NON VALIDE"
-    if "INCOMPLET" in window:
-        return "INCOMPLET"
-    if "VALIDE" in window:
-        return "VALIDE"
-    return "INDÉTERMINÉ"
