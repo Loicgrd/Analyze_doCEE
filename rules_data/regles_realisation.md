@@ -93,6 +93,7 @@ avec deux niveaux distincts :
 6. Contenir le **SIRET** du professionnel ayant émis la facture
 7. Vérifier que les travaux ont été réalisés à **100%** — un certificat de paiement partiel (ex : "Situation n°1 à 93%") n'est **pas valide**.
    > Une "Situation" n'est recevable que s'il s'agit de la **situation finale/de solde** attestant 100% des travaux et qu'il est certain que les travaux sont terminés.
+   > **Règle de présomption** : si le montant HT de la preuve de réalisation est **identique** au montant HT de la preuve d'engagement (au centime près, tolérance d'arrondi comprise), la réalisation est présumée être à **100%**, **sauf mention explicite contraire** sur le document indiquant qu'il ne s'agit que d'une situation partielle (ex: "situation n°X sur Y", un pourcentage d'avancement < 100% affiché). Aucune mention explicite "solde final" ou "décompte définitif" n'est requise en plus de cette égalité de montant.
 
 ### Données dossier
 - Adresses précises des travaux (obligatoire dans au moins un document)
