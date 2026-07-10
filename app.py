@@ -365,20 +365,99 @@ if uploaded:
             st.markdown(" ".join(f'<span class="info-pill">{p}</span>' for p in ctx_pills), unsafe_allow_html=True)
 
             st.divider()
-            st.subheader("📋 Analyse détaillée")
-            analyse = result.get("analyse", "")
 
-            if "##" in analyse:
-                sections = analyse.split("\n## ")
-                st.markdown(sections[0])
-                for section in sections[1:]:
-                    lines = section.split("\n", 1)
-                    title = lines[0].strip()
-                    body = lines[1].strip() if len(lines) > 1 else ""
-                    with st.expander(f"**{title}**", expanded=True):
-                        st.markdown(body)
+            audit = result.get("audit", {})
+
+            if audit:
+                # --- Synthèse narrative (lecture humaine rapide) ---
+                if audit.get("synthese_narrative"):
+                    st.info(audit["synthese_narrative"], icon="📝")
+
+                # --- Anomalies signalées (non bloquantes) ---
+                anomalies = audit.get("anomalies", [])
+                if anomalies:
+                    with st.expander(f"⚠️ Anomalies signalées ({len(anomalies)})", expanded=True):
+                        for a in anomalies:
+                            st.markdown(f"- {a}")
+
+                st.subheader("🔧 Éligibilité technique par fiche")
+                for fiche_obj in audit.get("fiches", []):
+                    v_tech = fiche_obj.get("verdict_technique", "?")
+                    icon = {"VALIDE": "✅", "NON VALIDE": "❌", "INCOMPLET": "⚠️"}.get(v_tech, "❓")
+                    code = fiche_obj.get("code", "?")
+                    version = fiche_obj.get("version_applicable", "")
+                    with st.expander(f"{icon} **{code}** ({version}) — {v_tech}", expanded=(v_tech != "VALIDE")):
+                        elements = fiche_obj.get("elements_techniques", [])
+                        if elements:
+                            rows = []
+                            for el in elements:
+                                conforme = el.get("conforme")
+                                conforme_str = "✅" if conforme is True else ("❌" if conforme is False else "—")
+                                present_str = "✅" if el.get("present") else "❌"
+                                verif = el.get("citation_verifiee")
+                                verif_str = "✅" if verif is True else ("⚠️ NON TROUVÉE" if verif is False else "—")
+                                rows.append({
+                                    "Élément": el.get("champ", "?"),
+                                    "Présent": present_str,
+                                    "Valeur trouvée": el.get("valeur_trouvee") or "—",
+                                    "Citation exacte (à vérifier)": el.get("citation_verbatim") or "—",
+                                    "Citation vérifiée": verif_str,
+                                    "Conforme": conforme_str,
+                                    "Source": el.get("source") or "—",
+                                })
+                            st.dataframe(rows, use_container_width=True, hide_index=True)
+                            n_non_verifiees = sum(1 for el in elements if el.get("citation_verifiee") is False)
+                            if n_non_verifiees:
+                                st.error(
+                                    f"⚠️ {n_non_verifiees} citation(s) introuvable(s) telle(s) quelle(s) "
+                                    f"dans les documents fournis — risque de citation fabriquée, à vérifier "
+                                    f"manuellement en priorité.",
+                                    icon="🚨",
+                                )
+                            st.caption(
+                                "La colonne « Citation exacte » reproduit mot pour mot la ligne "
+                                "source — vérifiez qu'elle concerne bien le composant attendu "
+                                "(une facture multi-lignes peut mentionner plusieurs marques/"
+                                "références pour des éléments différents). « Citation vérifiée » "
+                                "confirme seulement que le texte existe dans les documents, pas "
+                                "qu'il est correctement attribué au bon élément."
+                            )
+                        else:
+                            st.caption("Aucun élément technique détaillé retourné.")
+
+                st.subheader("📋 Validation globale du dossier")
+                axes = audit.get("axes", {})
+                axe_labels = {
+                    "logique_globale": "1. Logique globale",
+                    "engagement": "2. Validation engagement",
+                    "realisation_documentaire": "3. Validation réalisation (documentaire)",
+                    "rge": "4. Validation RGE",
+                    "ah": "5. Validation AH",
+                    "coherence": "6. Cohérence engagement ↔ réalisation",
+                    "documents_annexes": "7. Documents annexes",
+                }
+                for key, label in axe_labels.items():
+                    axe = axes.get(key)
+                    if not axe:
+                        continue
+                    v = axe.get("verdict", "?")
+                    icon = {"VALIDE": "✅", "NON VALIDE": "❌", "INCOMPLET": "⚠️"}.get(v, "❓")
+                    with st.expander(f"{icon} **{label}** — {v}", expanded=(v != "VALIDE")):
+                        controles = axe.get("controles", [])
+                        if controles:
+                            for c in controles:
+                                mark = "✅" if c.get("verdict") else "❌"
+                                line = f"{mark} {c.get('item', '?')}"
+                                if c.get("details"):
+                                    line += f" — _{c['details']}_"
+                                st.markdown(line)
+                                if c.get("source"):
+                                    st.caption(f"Source : {c['source']}")
+                        else:
+                            st.caption("Aucun contrôle détaillé retourné pour cet axe.")
             else:
-                st.markdown(analyse)
+                st.warning("Aucune donnée structurée retournée par l'API — réponse inattendue.", icon="⚠️")
+                st.text(result.get("analyse", "(vide)"))
 
             st.divider()
             export_data = {
@@ -388,7 +467,7 @@ if uploaded:
                 "tokens_used": tokens,
                 "cout_eur": round(cost_eur, 4),
                 "temps_secondes": round(elapsed, 1),
-                "analyse": analyse,
+                "audit": audit,
             }
             st.download_button(
                 label="⬇️ Télécharger le résultat (JSON)",
