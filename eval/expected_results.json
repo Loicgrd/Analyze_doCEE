@@ -27,6 +27,24 @@
         "points_bloquants_attendus": [],
         "commentaire": ""
       }
+    },
+    {
+      "fichier": "T266580.zip",
+      "attendu": {
+        "fiche": "BAR-EN-101",
+        "statut": "VALIDE",
+        "points_bloquants_attendus": [],
+        "commentaire": "VISA affiche 'opération standardisée BAR-TH-130' (libellé fixe lié à la case 'bâtiment neuf', NON cochée ici — 'bâtiment existant' est cochée). Ceci NE DOIT JAMAIS être signalé comme anomalie. Confirmé par l'utilisateur (règle permanente)."
+      }
+    },
+    {
+      "fichier": "T155418.zip",
+      "attendu": {
+        "fiche": "BAR-EN-105",
+        "statut": "A_COMPLETER",
+        "points_bloquants_attendus": [],
+        "commentaire": "Même schéma que T266580 : VISA affiche 'opération standardisée BAR-TH-130' (libellé fixe lié à la case 'bâtiment neuf', non cochée). NE DOIT JAMAIS être signalé comme anomalie — règle permanente confirmée par l'utilisateur."
+      }
     }
   ]
 }
