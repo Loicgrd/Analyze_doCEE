@@ -60,19 +60,10 @@ complémentaire utile, mais PAS une vérité à recopier aveuglément :
   la facture, ne le retiens pas : la nature réelle des travaux facturés prime
   toujours sur une mention déclarative isolée.
 {table_block}
-Réponds UNIQUEMENT en JSON valide, sans texte avant ou après, avec exactement ces clés :
-{{
-  "fiches": ["BAR-EN-105"],
-  "secteur": "BAR",
-  "coup_de_pouce": false,
-  "type_engagement": "ordre_de_service",
-  "sous_traitance": false,
-  "date_engagement": "23/02/2024",
-  "confiance": "haute",
-  "raisonnement": "explication courte citant les éléments des documents qui ont motivé ce choix"
-}}
+Termine TOUJOURS par UN SEUL appel à l'outil "classifier_dossier_cee" avec le
+résultat structuré. Ne produis pas de texte libre en dehors de cet appel.
 
-Valeurs possibles :
+Précisions sur les champs :
 - fiches : LISTE de codes exacts présents dans la nomenclature fournie. La plupart des
   dossiers n'ont qu'UNE fiche -> liste à un seul élément (ex: ["BAR-EN-105"]). Mais un
   dossier peut couvrir PLUSIEURS fiches simultanément si plusieurs types de travaux
@@ -105,6 +96,51 @@ matériaux, équipements), pas nécessairement celle écrite dans un formulaire
 déclaratif type VISA. Ex: si le VISA dit BAR-TH-130 mais que les travaux sont de
 l'isolation toiture terrasse sur bâtiment existant, la bonne fiche est BAR-EN-105.
 """.strip()
+
+
+# Schéma FIXE de l'outil de classification — même principe que l'audit
+# (claude_client.AUDIT_TOOL_SCHEMA) : sortie structurée forcée via tool_choice,
+# qui élimine la classe d'échec de l'ancien parsing texte (JSON tronqué en
+# plein milieu du 'raisonnement' par max_tokens -> exception -> fallback regex
+# silencieux en confiance faible).
+CLASSIFY_TOOL_SCHEMA = {
+    "name": "classifier_dossier_cee",
+    "description": ("Retourne la classification structurée du dossier CEE. "
+                     "Doit être appelé une seule fois, à la fin de l'analyse."),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "fiches": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": ("Codes fiche exacts de la nomenclature fournie (ex: ['BAR-EN-105']). "
+                                 "Plusieurs éléments seulement si plusieurs types de travaux distincts "
+                                 "sont facturés. ['INCONNUE'] si aucune correspondance raisonnable."),
+            },
+            "secteur": {"type": "string", "enum": ["BAR", "BAT"]},
+            "coup_de_pouce": {"type": "boolean"},
+            "type_engagement": {
+                "type": "string",
+                "enum": ["ordre_de_service", "bon_de_commande", "acte_engagement", "devis", "inconnu"],
+            },
+            "sous_traitance": {"type": "boolean"},
+            "date_engagement": {
+                "type": ["string", "null"],
+                "description": ("Date d'engagement au format JJ/MM/AAAA, telle qu'elle apparaît sur le "
+                                 "document d'engagement (OS, AE, devis, BC) ou à défaut sur le VISA. "
+                                 "CRITIQUE : détermine la VERSION de fiche applicable. null si introuvable."),
+            },
+            "confiance": {"type": "string", "enum": ["haute", "moyenne", "faible"]},
+            "raisonnement": {
+                "type": "string",
+                "description": ("1-2 phrases citant les éléments concrets des documents (matériau, "
+                                 "épaisseur, équipement...) qui justifient le choix de fiche."),
+            },
+        },
+        "required": ["fiches", "secteur", "coup_de_pouce", "type_engagement",
+                      "sous_traitance", "date_engagement", "confiance", "raisonnement"],
+    },
+}
 
 
 def classify_dossier_ia(
@@ -202,14 +238,20 @@ def classify_dossier_ia(
     try:
         response = client.messages.create(
             model=model,
-            max_tokens=400,
+            max_tokens=800,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
+            tools=[CLASSIFY_TOOL_SCHEMA],
+            tool_choice={"type": "tool", "name": "classifier_dossier_cee"},
         )
-        raw = response.content[0].text.strip()
-        raw = re.sub(r"^```json\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-        result = json.loads(raw)
+        result = None
+        for block in response.content:
+            if getattr(block, "type", None) == "tool_use" and block.name == "classifier_dossier_cee":
+                result = dict(block.input)
+                break
+        if result is None:
+            raise ValueError("Aucun bloc tool_use dans la réponse de classification "
+                             f"(stop_reason={response.stop_reason})")
 
         result.setdefault("fiches", ["INCONNUE"])
         if "fiche" in result and "fiches" not in result:  # rétrocompatibilité si le modèle répond à l'ancien format
@@ -458,11 +500,12 @@ def _detect_engagement_type(text_lower: str) -> str:
 
 def _fallback_classification() -> Dict:
     return {
-        "fiche": "INCONNUE",
+        "fiches": ["INCONNUE"],
         "secteur": "BAR",
         "coup_de_pouce": False,
         "type_engagement": "inconnu",
         "sous_traitance": False,
+        "date_engagement": None,
         "confiance": "faible",
         "raisonnement": "Aucun texte exploitable trouvé",
     }

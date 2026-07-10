@@ -159,6 +159,18 @@ class RuleLoader:
                 result = self._read_csv_filtered_by_date(csv_name, fiche, date_engagement)
                 source_label = csv_name
 
+            # Recoupement date/version : quel que soit le filtrage appliqué,
+            # fournir la liste compacte des périodes d'application de TOUTES
+            # les versions de la fiche (~quelques dizaines de tokens). Permet
+            # à Claude de détecter qu'une date d'engagement qu'il identifie
+            # lui-même dans les documents sort de la période de la version
+            # chargée (cas d'une date pré-analysée FAUSSE, non couvert par le
+            # seul mécanisme TOUTES VERSIONS/AMBIGU qui ne traite que les cas
+            # 'pas de date' et 'chevauchement').
+            periods_text = self._versions_periods_text(fiche, secteur)
+            if periods_text:
+                parts.append(periods_text)
+
             if result and result["text"]:
                 label_bits = [f"fiche {fiche}"]
                 if result["no_date"]:
@@ -216,6 +228,55 @@ class RuleLoader:
                 lines_out.append(f"- {code} ({secteur}) : {travaux}")
 
         return "\n".join(lines_out)
+
+    def _versions_periods_text(self, fiche: str, secteur: str) -> str:
+        """
+        Liste compacte 'version : période d'application' de TOUTES les versions
+        d'une fiche — injectée dans le bloc variable du prompt pour que Claude
+        puisse recouper la date d'engagement qu'il confirme lui-même avec la
+        version dont les seuils lui ont été fournis (cf. champ
+        date_engagement_confirmee du schéma d'audit). Coût : quelques dizaines
+        de tokens par fiche.
+        """
+        lines = []
+
+        xlsx_name = FICHE_XLSX.get(secteur)
+        if xlsx_name and (self.rules_dir / xlsx_name).exists():
+            import pandas as pd
+            cache_key = f"xlsx_df:{xlsx_name}"
+            if cache_key not in self._cache:
+                self._cache[cache_key] = pd.read_excel(self.rules_dir / xlsx_name)
+            df = self._cache[cache_key]
+            fiche_base = fiche.replace("-", "").upper()
+            code_col = (df["FICHE"].astype(str).str.split("\n").str[0]
+                        .str.replace("-", "").str.strip().str.upper())
+            for _, row in df[code_col == fiche_base].iterrows():
+                label = str(row.get("FICHE", "")).replace("\n", " ").strip()
+                debut = row.get("DEBUT D'APPLICATION ")
+                fin = row.get("FIN D'APPLICATION ")
+                debut_s = debut.strftime("%d/%m/%Y") if pd.notna(debut) else "?"
+                fin_s = fin.strftime("%d/%m/%Y") if pd.notna(fin) else "en cours"
+                lines.append(f"- {label} : {debut_s} → {fin_s}")
+        else:
+            import csv as _csv
+            import io as _io
+            csv_name = FICHE_CSV.get(secteur)
+            full_text = self._read_file(csv_name, encoding="latin-1") if csv_name else None
+            if full_text:
+                fiche_base = fiche.replace("-", "").upper()
+                reader = _csv.DictReader(_io.StringIO(full_text, newline=""), delimiter=";")
+                for row in reader:
+                    fiche_raw = (row.get("FICHE") or "").strip()
+                    if not fiche_raw or fiche_base not in fiche_raw.upper().replace("-", ""):
+                        continue
+                    debut = (row.get("DEBUT D'APPLICATION (Date d'engagement)") or "").strip() or "?"
+                    fin = (row.get("FIN D'APPLICATION (Date d'engagement)") or "").strip() or "en cours"
+                    lines.append(f"- {fiche_raw} : {debut} → {fin}")
+
+        if not lines:
+            return ""
+        return (f"--- Périodes d'application de TOUTES les versions de la fiche {fiche} "
+                f"(pour recouper la date d'engagement confirmée) ---\n" + "\n".join(lines))
 
     # ------------------------------------------------------------------
 

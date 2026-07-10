@@ -200,6 +200,32 @@ def ocr_pdf_smart(
     Returns:
         Texte OCR concaténé, avec repères de page.
     """
+    text, _meta = ocr_pdf_smart_meta(pdf_path, max_pages_ocr=max_pages_ocr, max_chars=max_chars)
+    return text
+
+
+def ocr_pdf_smart_meta(
+    pdf_path: Path,
+    max_pages_ocr: int = 6,
+    max_chars: int = 8000,
+) -> tuple:
+    """
+    Comme ocr_pdf_smart(), mais retourne aussi les MÉTADONNÉES DE COUVERTURE :
+    quelles pages ont été OCRisées, combien ont été sautées, si le texte a été
+    tronqué. Ces métadonnées sont injectées dans le prompt d'audit pour que
+    Claude sache distinguer "absent du document" et "absent de l'extrait
+    fourni" — sans elles, un élément situé sur une page intermédiaire non
+    OCRisée serait déclaré manquant à tort (faux verdict INCOMPLET/NON VALIDE).
+
+    Returns:
+        (texte, meta) avec meta = {
+            "truncated": bool,        # couverture partielle (pages sautées OU texte tronqué)
+            "pages_total": int,
+            "pages_ocr": [int],
+            "pages_sautees": int,
+            "couverture": str|None,   # phrase prête à injecter dans le prompt
+        }
+    """
     total_pages = get_page_count(pdf_path)
     half = max(1, max_pages_ocr // 2)
 
@@ -221,8 +247,85 @@ def ocr_pdf_smart(
         parts.insert(half, f"[... {skipped} page(s) intermédiaire(s) non OCRisée(s) ...]")
 
     full_text = "\n\n".join(parts)
-    if len(full_text) > max_chars:
+    text_truncated = len(full_text) > max_chars
+    if text_truncated:
         half_c = max_chars // 2
         full_text = full_text[:half_c] + "\n\n[...]\n\n" + full_text[-half_c:]
 
-    return full_text
+    notes = []
+    if skipped > 0:
+        notes.append(
+            f"OCR partiel : pages {pages_to_ocr[0]}-{pages_to_ocr[half - 1]} et "
+            f"{pages_to_ocr[half]}-{pages_to_ocr[-1]} sur {total_pages} "
+            f"({skipped} page(s) intermédiaire(s) NON lues)"
+        )
+    if text_truncated:
+        notes.append("texte OCR tronqué, coupures marquées [...]")
+
+    meta = {
+        "truncated": skipped > 0 or text_truncated,
+        "pages_total": total_pages,
+        "pages_ocr": pages_to_ocr,
+        "pages_sautees": skipped,
+        "couverture": " ; ".join(notes) if notes else None,
+    }
+    return full_text, meta
+
+
+def extract_document(pdf_path: Path, max_chars_text: int = 60000,
+                     max_pages_ocr: int = 6, max_chars_ocr: int = 8000) -> dict:
+    """
+    Point d'entrée unique d'extraction d'un PDF (texte natif OU scanné+OCR),
+    qui retourne le texte ET les métadonnées de couverture. À utiliser à la
+    place du couple is_scanned_pdf()/extract_text_from_pdf()/ocr_pdf_smart()
+    pour que le prompt d'audit connaisse la couverture réelle de chaque
+    document (voir claude_client._build_docs_section).
+
+    max_chars_text (60 000 ≈ 17k tokens) est un simple garde-fou contre un
+    PDF natif aberrant : pour les éléments techniques, la préservation des
+    annexes de facture prime largement sur l'économie de tokens (~3 €/million
+    de tokens input). C'est le budget GLOBAL du dossier, appliqué dans
+    claude_client._build_docs_section, qui arbitre en cas de dossier
+    réellement volumineux — en priorisant les preuves de réalisation.
+    """
+    pdf_path = Path(pdf_path)
+    pages_total = get_page_count(pdf_path)
+
+    if is_scanned_pdf(pdf_path):
+        # Exception ciblée : une PREUVE DE RÉALISATION scannée (facture, DGD,
+        # décompte...) porte les éléments techniques, souvent dans des annexes
+        # en pages intermédiaires. On élargit son OCR (toutes pages jusqu'à un
+        # plafond plus haut) plutôt que le schéma générique 3 début + 3 fin —
+        # le surcoût est du temps de traitement local (~3s/page), pas des
+        # tokens, et il évite des verdicts INCOMPLET 'hors extrait' évitables.
+        _preuve_kw = ("facture", "dgd", "decompte", "décompte", "situation", "solde")
+        if any(kw in pdf_path.name.lower() for kw in _preuve_kw):
+            max_pages_ocr = max(max_pages_ocr, 14)
+            max_chars_ocr = max(max_chars_ocr, 30000)
+        text, meta = ocr_pdf_smart_meta(pdf_path, max_pages_ocr=max_pages_ocr,
+                                        max_chars=max_chars_ocr)
+        return {"text": text, "scanned": True, "path": str(pdf_path),
+                "pages_total": pages_total, **meta}
+
+    try:
+        result = subprocess.run(
+            ["pdftotext", "-layout", str(pdf_path), "-"],
+            capture_output=True, text=True, timeout=30,
+        )
+        full = result.stdout.strip()
+    except Exception as e:
+        return {"text": f"[Erreur extraction texte: {e}]", "scanned": False,
+                "path": str(pdf_path), "pages_total": pages_total,
+                "truncated": False, "orig_chars": 0, "couverture": None}
+
+    text = smart_truncate(full, max_chars_text)
+    truncated = len(text) < len(full)
+    couverture = None
+    if truncated:
+        pct = min(99, round(100 * len(text) / max(1, len(full))))
+        couverture = (f"texte tronqué : ~{pct}% des {len(full):,} caractères du "
+                      f"document ({pages_total} page(s)) sont fournis, "
+                      f"coupures marquées [...]")
+    return {"text": text, "scanned": False, "path": str(pdf_path),
+            "pages_total": pages_total, "truncated": truncated,
+            "orig_chars": len(full), "couverture": couverture}

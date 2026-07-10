@@ -77,6 +77,14 @@ _ELEMENT_TECHNIQUE_SCHEMA = {
             "type": ["string", "null"],
             "description": "Document et emplacement (ex: 'Facture p.4, annexe technique, section isolation combles').",
         },
+        "hors_extrait_possible": {
+            "type": ["boolean", "null"],
+            "description": ("À remplir UNIQUEMENT si present=false : true si le document où cet "
+                             "élément était attendu est marqué [EXTRAIT PARTIEL] (pages non OCRisées "
+                             "ou texte tronqué) — l'élément pourrait se trouver dans une partie non "
+                             "fournie et son absence n'est PAS certaine. false si le document est "
+                             "marqué [DOCUMENT COMPLET] (absence définitive). null si present=true."),
+        },
     },
     "required": ["champ", "present"],
 }
@@ -150,6 +158,17 @@ AUDIT_TOOL_SCHEMA = {
                 },
                 "required": ["logique_globale", "engagement", "realisation_documentaire", "rge", "ah", "coherence"],
             },
+            "date_engagement_confirmee": {
+                "type": ["string", "null"],
+                "description": ("Date d'engagement (JJ/MM/AAAA) que TU as identifiée toi-même dans les "
+                                 "documents, indépendamment du 'CONTEXTE PRÉ-ANALYSÉ'. null si réellement "
+                                 "introuvable. IMPÉRATIF : si cette date diffère de celle du contexte "
+                                 "pré-analysé, OU si elle sort de la période d'application de la version "
+                                 "de fiche chargée dans les règles (périodes listées dans le bloc de "
+                                 "règles), les seuils vérifiés proviennent potentiellement de la MAUVAISE "
+                                 "version — ajoute une anomalie explicite 'VERSION DE FICHE À REVÉRIFIER' "
+                                 "et le statut global ne peut alors pas être VALIDE (au mieux INCOMPLET)."),
+            },
             "anomalies": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -168,7 +187,7 @@ AUDIT_TOOL_SCHEMA = {
                 "description": "Résumé libre de 4 à 8 phrases pour une lecture humaine rapide : fiche(s), verdict global, points bloquants principaux.",
             },
         },
-        "required": ["fiches", "axes", "statut_global", "synthese_narrative"],
+        "required": ["fiches", "axes", "date_engagement_confirmee", "statut_global", "synthese_narrative"],
     },
 }
 
@@ -192,12 +211,21 @@ spécialisé dans l'analyse de conformité des dossiers réglementaires.
    "version_applicable". Si aucune date d'engagement n'est identifiable nulle part dans
    les documents, retiens la version la PLUS RÉCENTE disponible par défaut, et
    signale-le explicitement dans les anomalies.
+   RECOUPEMENT OBLIGATOIRE : remplis toujours "date_engagement_confirmee" avec la date
+   que TU as toi-même identifiée dans les documents. Le bloc de règles liste les
+   périodes d'application de TOUTES les versions de chaque fiche : vérifie que ta date
+   confirmée tombe bien dans la période de la version dont les seuils t'ont été
+   fournis. Si ce n'est pas le cas (date différente de celle du contexte pré-analysé,
+   ou hors période), les seuils que tu vérifies proviennent peut-être de la MAUVAISE
+   version : ajoute l'anomalie 'VERSION DE FICHE À REVÉRIFIER' et ne rends jamais un
+   statut global VALIDE dans cette situation (au mieux INCOMPLET).
 3. Pour chaque fiche, remplir "elements_techniques" en suivant EXACTEMENT la checklist
    de champs atomiques fournie dans le bloc de règles de cette fiche (noms de champs
    imposés). Vérifier que chaque élément est présent ET conforme au seuil minimum sur
    la PREUVE DE RÉALISATION elle-même (jamais uniquement sur l'AH — voir règle générale
-   de `regles_ah.md`). Lire l'intégralité du document, y compris les annexes techniques
-   multi-pages qui accompagnent souvent une facture ou un DGD.
+   de `regles_ah.md`). Lire tout le texte fourni du document, y compris les annexes
+   techniques multi-pages qui accompagnent souvent une facture ou un DGD, en tenant
+   compte de sa COUVERTURE (voir section dédiée ci-dessous).
 
 ## Temps 2 — Les règles de validation globales
 Une fois le cœur technique établi, vérifier la cohérence et la conformité de
@@ -206,6 +234,20 @@ remplissant chaque axe de "axes" avec ses points de contrôle ("controles").
 Un dossier peut avoir un cœur technique parfaitement valide et être NON VALIDE
 ou INCOMPLET à cause d'un défaut sur ces règles de validation (document manquant,
 signature absente, incohérence de prix...), et inversement.
+
+# COUVERTURE DOCUMENTAIRE (CRITIQUE)
+Chaque document du dossier est marqué [DOCUMENT COMPLET] ou [EXTRAIT PARTIEL : ...] :
+- [DOCUMENT COMPLET] : tout le texte du document t'est fourni. Un élément absent
+  est RÉELLEMENT absent du document — conclusion définitive autorisée.
+- [EXTRAIT PARTIEL] : des pages n'ont pas été OCRisées ou le texte a été tronqué
+  (coupures marquées [...] ou [... N page(s) non OCRisée(s) ...]). Un élément
+  attendu mais introuvable dans un tel extrait POURRAIT se trouver dans une partie
+  non fournie. Dans ce cas : mets present=false ET hors_extrait_possible=true,
+  ajoute une anomalie précisant le document et les pages/sections manquantes, et
+  tire le verdict vers INCOMPLET (vérification humaine du document original
+  requise) — JAMAIS vers NON VALIDE sur la seule base de cette absence incertaine.
+  Ne conclus NON VALIDE que sur une non-conformité POSITIVE (valeur présente mais
+  sous le seuil, incohérence avérée...), pas sur une absence dans un extrait partiel.
 
 # RÈGLES DE CONTRÔLE PAR POINT
 Pour chaque point de contrôle :
@@ -413,12 +455,16 @@ def analyze_with_claude(
         est = (len(prompt["system"]) + len(prompt["core_block"]) + len(prompt["variable_block"])) // 4
         print(f"   → Estimation tokens envoyés : ~{est:,}")
 
+    MAX_TOKENS_CAP = 16000
+    current_max_tokens = max_tokens
     response = None
-    for attempt in range(3):
+    reponse_tronquee = False
+
+    for attempt in range(4):
         try:
             response = client.messages.create(
                 model=model,
-                max_tokens=max_tokens,
+                max_tokens=current_max_tokens,
                 system=[{
                     "type": "text",
                     "text": prompt["system"],
@@ -428,12 +474,31 @@ def analyze_with_claude(
                 tools=[AUDIT_TOOL_SCHEMA],
                 tool_choice={"type": "tool", "name": "produire_audit_cee"},
             )
-            break
         except anthropic.RateLimitError:
-            if attempt < 2:
+            if attempt < 3:
                 time.sleep((attempt + 1) * 10)
-            else:
-                raise
+                continue
+            raise
+        except anthropic.APIStatusError as e:
+            # 529 (overloaded) / 5xx transitoires : même traitement que le rate limit.
+            if getattr(e, "status_code", 0) in (500, 502, 503, 529) and attempt < 3:
+                time.sleep((attempt + 1) * 10)
+                continue
+            raise
+
+        # Réponse coupée par max_tokens : le tool_use serait incomplet/absent et
+        # le statut retomberait silencieusement en INDÉTERMINÉ. On relance UNE
+        # fois avec un budget doublé (dossier multi-fiches volumineux) plutôt
+        # que de rendre un résultat vide inexpliqué.
+        if response.stop_reason == "max_tokens" and current_max_tokens < MAX_TOKENS_CAP:
+            if verbose:
+                print(f"   ⚠️ Réponse tronquée à {current_max_tokens} tokens — "
+                      f"relance avec {min(MAX_TOKENS_CAP, current_max_tokens * 2)}")
+            current_max_tokens = min(MAX_TOKENS_CAP, current_max_tokens * 2)
+            continue
+
+        reponse_tronquee = (response.stop_reason == "max_tokens")
+        break
 
     audit_data = _extract_tool_use(response)
     if audit_data:
@@ -443,7 +508,11 @@ def analyze_with_claude(
     return {
         "audit": audit_data,
         "statut": audit_data.get("statut_global", "INDÉTERMINÉ") if audit_data else "INDÉTERMINÉ",
-        "analyse": audit_data.get("synthese_narrative", "") if audit_data else "",
+        "analyse": audit_data.get("synthese_narrative", "") if audit_data else (
+            "⚠️ Réponse API tronquée (limite de tokens atteinte malgré la relance) — "
+            "résultat inexploitable, relancer l'analyse." if reponse_tronquee else ""
+        ),
+        "reponse_tronquee": reponse_tronquee,
         "tokens_used": {
             "input": usage.input_tokens,
             "output": usage.output_tokens,
@@ -499,26 +568,91 @@ def verify_citations(audit_data: Dict[str, Any], docs: Dict[str, dict]) -> Dict[
                 el["citation_verifiee"] = None  # non applicable
                 continue
             citation_norm = _normalise(citation)
-            # Tolérance : cherche la citation, ou au moins sa moitié la plus
-            # longue si l'OCR/l'extraction a pu introduire de petites erreurs.
             if citation_norm in full_corpus:
                 el["citation_verifiee"] = True
             else:
-                # Repli tolérant : découpe en mots et vérifie qu'une bonne
-                # proportion (80%) des mots de la citation apparaît dans le
-                # corpus, dans le désordre (tolère les erreurs OCR mineures).
-                mots = [w for w in citation_norm.split() if len(w) > 2]
-                if mots:
-                    trouves = sum(1 for w in mots if w in full_corpus)
-                    el["citation_verifiee"] = (trouves / len(mots)) >= 0.8
-                else:
+                # Repli tolérant aux erreurs OCR : cherche au moins une fenêtre
+                # de mots CONSÉCUTIFS de la citation présente telle quelle dans
+                # le corpus. Bien plus discriminant que l'ancien critère "80%
+                # des mots présents dans le désordre n'importe où" : une
+                # citation fabriquée à partir de vocabulaire CEE courant
+                # ('marque référence isolant résistance thermique') passait
+                # presque toujours l'ancien test, alors qu'elle échoue à celui-ci.
+                mots = citation_norm.split()
+                if len(mots) < 4:
+                    # Citation trop courte pour un test par fenêtre fiable :
+                    # exiger le match exact (déjà échoué ci-dessus).
                     el["citation_verifiee"] = False
+                else:
+                    n = min(6, len(mots))
+                    el["citation_verifiee"] = any(
+                        " ".join(mots[i:i + n]) in full_corpus
+                        for i in range(len(mots) - n + 1)
+                    )
 
     return audit_data
 
 
+# ---------------------------------------------------------------------------
+# Budget documentaire : par défaut, TOUT le texte extrait est envoyé (les
+# éléments techniques d'une facture se trouvent souvent dans les annexes,
+# une troncature fixe par document coûtait des verdicts INCOMPLET à tort
+# pour économiser ~0,004 € de tokens). La troncature ne s'applique QUE si le
+# corpus total du dossier dépasse le budget global ci-dessous (~34k tokens,
+# soit ~0,10 € d'input plein tarif) — cas pathologique, toujours signalé via
+# les marqueurs [EXTRAIT PARTIEL]. En cas de dépassement, les preuves de
+# réalisation (facture/DGD) sont servies en priorité et tronquées en dernier.
+# ---------------------------------------------------------------------------
+_DOCS_GLOBAL_MAX_CHARS = 120_000
+_DOC_MIN_CHARS = 4_000
+_PREUVE_KEYWORDS = ("facture", "dgd", "decompte", "décompte", "situation", "solde")
+
+
+def _is_preuve_realisation(name: str) -> bool:
+    return any(kw in name.lower() for kw in _PREUVE_KEYWORDS)
+
+
+def _allocate_doc_budgets(docs: Dict[str, dict]) -> Dict[str, int]:
+    """
+    Répartit le budget global de caractères entre les documents.
+    Si tout tient dans le budget : chaque doc reçoit sa longueur complète.
+    Sinon : parcours par priorité (preuves de réalisation d'abord), chaque
+    doc reçoit le maximum possible en réservant _DOC_MIN_CHARS à chacun des
+    documents restants (aucun document n'est jamais totalement évincé).
+    """
+    total = sum(len(d.get("text", "")) for d in docs.values())
+    if total <= _DOCS_GLOBAL_MAX_CHARS:
+        return {name: len(d.get("text", "")) for name, d in docs.items()}
+
+    ordered = sorted(docs.keys(), key=lambda n: (not _is_preuve_realisation(n), n))
+    budgets = {}
+    remaining = _DOCS_GLOBAL_MAX_CHARS
+    for i, name in enumerate(ordered):
+        n_rest = len(ordered) - i - 1
+        length = len(docs[name].get("text", ""))
+        cap = max(_DOC_MIN_CHARS, remaining - n_rest * _DOC_MIN_CHARS)
+        budgets[name] = min(length, cap)
+        remaining -= budgets[name]
+    return budgets
+
+
 def _build_docs_section(docs: Dict[str, dict]) -> str:
-    parts = ["# DOCUMENTS DU DOSSIER À ANALYSER"]
+    """
+    Assemble la section documents du prompt, avec pour CHAQUE document un
+    marqueur de couverture explicite [DOCUMENT COMPLET] ou [EXTRAIT PARTIEL:...].
+
+    Sans ce marqueur, Claude ne peut pas distinguer "absent du document" et
+    "absent de l'extrait fourni" (le system prompt lui interdit désormais de
+    conclure NON VALIDE sur une absence dans un extrait partiel). Les
+    métadonnées de couverture viennent d'extractor.extract_document() ; si
+    elles sont absentes (ancien appelant), la troncature appliquée ici est
+    quand même détectée et signalée.
+    """
+    budgets = _allocate_doc_budgets(docs)
+
+    parts = ["# DOCUMENTS DU DOSSIER À ANALYSER",
+             "(chaque document indique sa couverture : COMPLET ou EXTRAIT PARTIEL "
+             "— voir la section 'COUVERTURE DOCUMENTAIRE' des instructions)"]
     for name, doc in docs.items():
         scanned = " [SCANNÉ - OCR]" if doc.get("scanned") else ""
         text = doc.get("text", "")
@@ -526,6 +660,21 @@ def _build_docs_section(docs: Dict[str, dict]) -> str:
         # les documents multi-fiches comme une AH à plusieurs parties A) au
         # lieu d'une troncature naïve tête+queue qui risquerait d'en effacer
         # une entièrement si elle se trouve au milieu d'un document long.
-        text = smart_truncate(text, max_chars=10000)
-        parts.append(f"\n--- {name.upper()}{scanned} ---\n{text}")
+        truncated_text = smart_truncate(text, max_chars=budgets.get(name, len(text)))
+
+        notes = []
+        if doc.get("couverture"):
+            notes.append(doc["couverture"])
+        elif doc.get("truncated"):
+            notes.append("couverture partielle (détail non disponible), coupures marquées [...]")
+        if len(truncated_text) < len(text):
+            notes.append(f"extrait re-tronqué à ~{budgets.get(name, 0):,} caractères "
+                         f"(budget global du dossier dépassé), coupures marquées [...]")
+
+        if notes:
+            coverage = f" [EXTRAIT PARTIEL : {' ; '.join(notes)}]"
+        else:
+            coverage = " [DOCUMENT COMPLET]"
+
+        parts.append(f"\n--- {name.upper()}{scanned}{coverage} ---\n{truncated_text}")
     return "\n".join(parts)
