@@ -345,10 +345,18 @@ if uploaded:
             with col3:
                 tokens = result.get("tokens_used", {})
                 total_tok = tokens.get("total", 0)
+                # Coût COMPLET : input + output + écriture de cache (facturée 1,25x
+                # le tarif input) + lecture de cache (0,1x). L'ancien calcul ignorait
+                # le cache_write et sous-estimait ~35% sur un premier appel.
+                # Tarif standard (conservateur) — voir constantes dans claude_client :
+                # jusqu'au 31/08/2026, Sonnet 5 est au tarif de lancement (~33% moins cher).
+                from utils.claude_client import PRICE_INPUT_USD_MTOK, PRICE_OUTPUT_USD_MTOK
                 cost_eur = (
-                    tokens.get("input", 0) * 3 / 1_000_000
-                    + tokens.get("output", 0) * 15 / 1_000_000
-                ) * 0.92
+                    tokens.get("input", 0) * PRICE_INPUT_USD_MTOK
+                    + tokens.get("output", 0) * PRICE_OUTPUT_USD_MTOK
+                    + tokens.get("cache_write", 0) * PRICE_INPUT_USD_MTOK * 1.25
+                    + tokens.get("cache_read", 0) * PRICE_INPUT_USD_MTOK * 0.1
+                ) / 1_000_000 * 0.92
                 st.markdown(
                     f'<div class="cost-box">🪙 <b>{total_tok:,}</b> tokens utilisés<br>'
                     f'💶 <b>~{cost_eur:.4f} €</b> · ⏱ {elapsed:.1f}s</div>',
@@ -405,79 +413,207 @@ if uploaded:
                         icon="🚨",
                     )
 
-                # --- Synthèse narrative (lecture humaine rapide) ---
-                if audit.get("synthese_narrative"):
-                    st.info(audit["synthese_narrative"], icon="📝")
+                # =====================================================
+                # 1. ÉLÉMENTS CLÉS DU DOSSIER (toujours visibles)
+                # =====================================================
+                st.subheader("📅 Éléments clés")
+                date_eng = audit.get("date_engagement_confirmee") or classification.get("date_engagement")
+                date_rea = audit.get("date_realisation")
+                type_eng_lbl = {
+                    "ordre_de_service": "Ordre de service", "bon_de_commande": "Bon de commande",
+                    "acte_engagement": "Acte d'engagement", "devis": "Devis", "inconnu": "Inconnu",
+                }.get(classification.get("type_engagement", "inconnu"), "?")
 
-                # --- Anomalies signalées (non bloquantes) ---
-                anomalies = audit.get("anomalies", [])
-                if anomalies:
-                    with st.expander(f"⚠️ Anomalies signalées ({len(anomalies)})", expanded=True):
-                        for a in anomalies:
-                            st.markdown(f"- {a}")
+                delai_str, incoherence_dates = "—", False
+                if date_eng and date_rea:
+                    try:
+                        from datetime import datetime as _dt
+                        _d1 = _dt.strptime(date_eng, "%d/%m/%Y")
+                        _d2 = _dt.strptime(date_rea, "%d/%m/%Y")
+                        _delai = (_d2 - _d1).days
+                        delai_str = f"{_delai} j"
+                        incoherence_dates = _delai < 0
+                    except ValueError:
+                        delai_str = "format ?"
 
-                st.subheader("🔧 Éligibilité technique par fiche")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Date d'engagement", date_eng or "❌ Introuvable",
+                          help=f"Document d'engagement : {type_eng_lbl}. "
+                               "Date confirmée par l'audit dans les documents — elle détermine "
+                               "la version de fiche et la validité RGE.")
+                c2.metric("Date de réalisation", date_rea or "❌ Introuvable",
+                          help="Date d'achèvement des travaux, ou à défaut date de la facture "
+                               "finale / du DGD.")
+                c3.metric("Délai eng. → réal.", delai_str,
+                          help="Vérification déterministe (calculée en Python, pas par l'IA). "
+                               "Un délai négatif est une incohérence majeure.")
+                c4.metric("Fiche(s)", ", ".join(
+                    f.get("code", "?") for f in audit.get("fiches", [])) or "?")
+
+                for fiche_obj in audit.get("fiches", []):
+                    if fiche_obj.get("version_applicable"):
+                        st.caption(f"**{fiche_obj.get('code', '?')}** — {fiche_obj['version_applicable']}")
+
+                # --- Identité & lieu (preuve de réalisation) ---
+                pro = audit.get("professionnel_realisation")
+                adresse = audit.get("adresse_travaux")
+                sous_t = audit.get("sous_traitant")
+                st.markdown(
+                    f"**🏗️ Professionnel (réalisation) :** {pro or '❌ Non identifié'}  \n"
+                    f"**📍 Adresse des travaux :** {adresse or '❌ Introuvable'}"
+                )
+                if sous_t:
+                    st.warning(f"**Sous-traitance détectée :** {sous_t} — en cas de "
+                               f"sous-traitance, c'est le sous-traitant qui doit porter la "
+                               f"qualification RGE quand la fiche l'exige.", icon="🔩")
+
+                # --- RGE : affichée seulement si la fiche/version l'exige ---
+                # (colonne 'QUALIFICATION DU PROFESSIONNEL' du récap xlsx : 55
+                # versions BAR sur 132 n'exigent aucune qualification)
+                axes_preview = audit.get("axes", {})
+                rge_verdict = (axes_preview.get("rge") or {}).get("verdict", "?")
+                rge_icon = {"VALIDE": "✅", "NON VALIDE": "❌", "INCOMPLET": "⚠️"}.get(rge_verdict, "❓")
+                for fiche_obj in audit.get("fiches", []):
+                    code = fiche_obj.get("code", "?")
+                    try:
+                        qual = loader.get_qualification_requise(
+                            code, classification.get("secteur", "BAR"), date_eng)
+                    except Exception:
+                        qual = {"requise": None, "texte": None}
+                    if qual["requise"] is True:
+                        texte_court = (qual["texte"] or "").replace("\n", " · ")
+                        if len(texte_court) > 140:
+                            texte_court = texte_court[:140] + "…"
+                        st.markdown(f"**🎓 RGE requise** ({code}) : {texte_court}  \n"
+                                    f"→ Verdict axe RGE : {rge_icon} **{rge_verdict}**")
+                    elif qual["requise"] is False:
+                        st.markdown(f"**🎓 RGE** ({code}) : _non requise pour cette "
+                                    f"fiche/version à la date d'engagement_")
+                    else:
+                        st.caption(f"🎓 RGE ({code}) : exigence non déterminable depuis le "
+                                   f"référentiel (fiche absente du récap xlsx) — voir l'axe "
+                                   f"RGE dans le récapitulatif.")
+
+                # Montant HT : volontairement discret — sert au lien fort
+                # engagement ↔ réalisation, pas un élément d'éligibilité.
+                if audit.get("montant_ht"):
+                    st.caption(f"Montant HT (preuve de réalisation, lien fort "
+                               f"engagement ↔ réalisation) : {audit['montant_ht']}")
+
+                if incoherence_dates:
+                    st.error("🚨 La date de réalisation est ANTÉRIEURE à la date "
+                             "d'engagement — incohérence majeure (travaux engagés après "
+                             "leur réalisation ?). À vérifier en priorité absolue.", icon="🚨")
+
+                # =====================================================
+                # 2. ÉLÉMENTS TECHNIQUES DES TRAVAUX (toujours visibles)
+                # =====================================================
+                st.subheader("🔧 Éléments techniques des travaux")
                 for fiche_obj in audit.get("fiches", []):
                     v_tech = fiche_obj.get("verdict_technique", "?")
                     icon = {"VALIDE": "✅", "NON VALIDE": "❌", "INCOMPLET": "⚠️"}.get(v_tech, "❓")
-                    code = fiche_obj.get("code", "?")
-                    version = fiche_obj.get("version_applicable", "")
-                    with st.expander(f"{icon} **{code}** ({version}) — {v_tech}", expanded=(v_tech != "VALIDE")):
-                        elements = fiche_obj.get("elements_techniques", [])
-                        if elements:
-                            rows = []
-                            for el in elements:
-                                conforme = el.get("conforme")
-                                conforme_str = "✅" if conforme is True else ("❌" if conforme is False else "—")
-                                if el.get("present"):
-                                    present_str = "✅"
-                                elif el.get("hors_extrait_possible"):
-                                    present_str = "❓ hors extrait ?"
-                                else:
-                                    present_str = "❌"
-                                verif = el.get("citation_verifiee")
-                                verif_str = "✅" if verif is True else ("⚠️ NON TROUVÉE" if verif is False else "—")
-                                rows.append({
-                                    "Élément": el.get("champ", "?"),
-                                    "Présent": present_str,
-                                    "Valeur trouvée": el.get("valeur_trouvee") or "—",
-                                    "Citation exacte (à vérifier)": el.get("citation_verbatim") or "—",
-                                    "Citation vérifiée": verif_str,
-                                    "Conforme": conforme_str,
-                                    "Source": el.get("source") or "—",
-                                })
-                            st.dataframe(rows, use_container_width=True, hide_index=True)
-                            n_hors_extrait = sum(1 for el in elements if el.get("hors_extrait_possible"))
-                            if n_hors_extrait:
-                                st.warning(
-                                    f"❓ {n_hors_extrait} élément(s) introuvable(s) dans un document à "
-                                    f"couverture PARTIELLE (pages non OCRisées ou texte tronqué) : leur "
-                                    f"absence n'est pas certaine — vérifier le document original avant "
-                                    f"de conclure à une non-conformité.",
-                                    icon="⚠️",
-                                )
-                            n_non_verifiees = sum(1 for el in elements if el.get("citation_verifiee") is False)
-                            if n_non_verifiees:
-                                st.error(
-                                    f"⚠️ {n_non_verifiees} citation(s) introuvable(s) telle(s) quelle(s) "
-                                    f"dans les documents fournis — risque de citation fabriquée, à vérifier "
-                                    f"manuellement en priorité.",
-                                    icon="🚨",
-                                )
-                            st.caption(
-                                "La colonne « Citation exacte » reproduit mot pour mot la ligne "
-                                "source — vérifiez qu'elle concerne bien le composant attendu "
-                                "(une facture multi-lignes peut mentionner plusieurs marques/"
-                                "références pour des éléments différents). « Citation vérifiée » "
-                                "confirme seulement que le texte existe dans les documents, pas "
-                                "qu'il est correctement attribué au bon élément."
-                            )
-                        else:
-                            st.caption("Aucun élément technique détaillé retourné.")
+                    if len(audit.get("fiches", [])) > 1:
+                        st.markdown(f"{icon} **{fiche_obj.get('code', '?')}** — verdict technique : {v_tech}")
+                    else:
+                        st.markdown(f"{icon} Verdict technique : **{v_tech}**")
+                    elements = fiche_obj.get("elements_techniques", [])
+                    if elements:
+                        rows = []
+                        for el in elements:
+                            conforme = el.get("conforme")
+                            conforme_str = "✅" if conforme is True else ("❌" if conforme is False else "—")
+                            if el.get("present"):
+                                present_str = "✅"
+                            elif el.get("hors_extrait_possible"):
+                                present_str = "❓ hors extrait ?"
+                            else:
+                                present_str = "❌"
+                            verif = el.get("citation_verifiee")
+                            verif_str = "✅" if verif is True else ("⚠️ NON TROUVÉE" if verif is False else "—")
+                            rows.append({
+                                "Élément": el.get("champ", "?"),
+                                "Présent": present_str,
+                                "Valeur trouvée": el.get("valeur_trouvee") or "—",
+                                "Conforme": conforme_str,
+                                "Citation vérifiée": verif_str,
+                                "Citation exacte (à vérifier)": el.get("citation_verbatim") or "—",
+                                "Source": el.get("source") or "—",
+                            })
+                        st.dataframe(rows, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("Aucun élément technique détaillé retourné.")
+                st.caption(
+                    "« Citation vérifiée » confirme que le texte existe dans les documents, "
+                    "pas qu'il est attribué au bon composant — sur une facture multi-lignes, "
+                    "vérifiez la colonne « Citation exacte »."
+                )
 
-                st.subheader("📋 Validation globale du dossier")
+                # =====================================================
+                # 3. POINTS À VÉRIFIER (consolidés, toujours visibles)
+                # =====================================================
+                st.subheader("🔍 Points à vérifier")
+                bloquants, avertissements = [], []
+
+                # a) Contrôles en échec, tous axes confondus
                 axes = audit.get("axes", {})
                 axe_labels = {
+                    "logique_globale": "Logique globale",
+                    "engagement": "Engagement",
+                    "realisation_documentaire": "Réalisation",
+                    "rge": "RGE",
+                    "ah": "AH",
+                    "coherence": "Cohérence eng. ↔ réal.",
+                    "documents_annexes": "Documents annexes",
+                }
+                for key, label in axe_labels.items():
+                    axe = axes.get(key) or {}
+                    axe_v = axe.get("verdict", "")
+                    for ctrl in axe.get("controles", []):
+                        if not ctrl.get("verdict"):
+                            txt = f"**[{label}]** {ctrl.get('item', '?')}"
+                            if ctrl.get("details"):
+                                txt += f" — {ctrl['details']}"
+                            (bloquants if axe_v == "NON VALIDE" else avertissements).append(txt)
+
+                # b) Éléments techniques en défaut
+                for fiche_obj in audit.get("fiches", []):
+                    code = fiche_obj.get("code", "?")
+                    for el in fiche_obj.get("elements_techniques", []):
+                        champ = el.get("champ", "?")
+                        if el.get("conforme") is False:
+                            bloquants.append(f"**[Technique {code}]** `{champ}` NON CONFORME au seuil "
+                                             f"(valeur : {el.get('valeur_trouvee') or '?'})")
+                        elif not el.get("present") and el.get("hors_extrait_possible"):
+                            avertissements.append(f"**[Technique {code}]** `{champ}` introuvable, mais le "
+                                                  f"document source est PARTIEL — vérifier le document original")
+                        elif not el.get("present"):
+                            avertissements.append(f"**[Technique {code}]** `{champ}` absent de la preuve "
+                                                  f"de réalisation")
+                        if el.get("citation_verifiee") is False:
+                            bloquants.append(f"**[Technique {code}]** citation de `{champ}` INTROUVABLE "
+                                             f"dans les documents — risque d'hallucination, vérifier en priorité")
+
+                # c) Anomalies signalées par l'audit
+                for a in audit.get("anomalies", []):
+                    avertissements.append(f"**[Anomalie]** {a}")
+
+                if not bloquants and not avertissements:
+                    st.success("Aucun point bloquant ni anomalie détecté sur ce dossier.", icon="✅")
+                else:
+                    for b in bloquants:
+                        st.error(b, icon="❌")
+                    for w in avertissements:
+                        st.warning(w, icon="⚠️")
+
+                # =====================================================
+                # 4. RÉCAP COMPLET (replié — vue épurée)
+                # =====================================================
+                st.subheader("📋 Récapitulatif complet des vérifications")
+                if audit.get("synthese_narrative"):
+                    with st.expander("📝 Synthèse narrative", expanded=False):
+                        st.markdown(audit["synthese_narrative"])
+
+                axe_labels_full = {
                     "logique_globale": "1. Logique globale",
                     "engagement": "2. Validation engagement",
                     "realisation_documentaire": "3. Validation réalisation (documentaire)",
@@ -486,13 +622,16 @@ if uploaded:
                     "coherence": "6. Cohérence engagement ↔ réalisation",
                     "documents_annexes": "7. Documents annexes",
                 }
-                for key, label in axe_labels.items():
+                for key, label in axe_labels_full.items():
                     axe = axes.get(key)
                     if not axe:
                         continue
                     v = axe.get("verdict", "?")
                     icon = {"VALIDE": "✅", "NON VALIDE": "❌", "INCOMPLET": "⚠️"}.get(v, "❓")
-                    with st.expander(f"{icon} **{label}** — {v}", expanded=(v != "VALIDE")):
+                    n_ok = sum(1 for c in axe.get("controles", []) if c.get("verdict"))
+                    n_tot = len(axe.get("controles", []))
+                    with st.expander(f"{icon} **{label}** — {v} ({n_ok}/{n_tot} contrôles OK)",
+                                     expanded=False):
                         controles = axe.get("controles", [])
                         if controles:
                             for c in controles:
@@ -505,6 +644,9 @@ if uploaded:
                                     st.caption(f"Source : {c['source']}")
                         else:
                             st.caption("Aucun contrôle détaillé retourné pour cet axe.")
+
+                with st.expander("🏷️ Classification du dossier", expanded=False):
+                    st.json(classification)
             else:
                 st.warning("Aucune donnée structurée retournée par l'API — réponse inattendue.", icon="⚠️")
                 st.text(result.get("analyse", "(vide)"))
