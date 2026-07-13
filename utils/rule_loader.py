@@ -278,6 +278,58 @@ class RuleLoader:
         return (f"--- Périodes d'application de TOUTES les versions de la fiche {fiche} "
                 f"(pour recouper la date d'engagement confirmée) ---\n" + "\n".join(lines))
 
+    def get_qualification_requise(self, fiche: str, secteur: str,
+                                   date_engagement: Optional[str] = None) -> dict:
+        """
+        Indique si une qualification (RGE) est exigée pour cette fiche à cette
+        date d'engagement, d'après la colonne 'QUALIFICATION DU PROFESSIONNEL'
+        du récap xlsx. Utilisé par l'app pour n'afficher le statut RGE que
+        quand il est pertinent (55 versions BAR sur 132 n'exigent rien).
+
+        Returns:
+            {"requise": bool|None, "texte": str|None}
+            - requise=None si la fiche/version est introuvable dans le xlsx.
+            - Le texte peut contenir des exigences dépendant de sous-périodes
+              d'engagement ('Trx engagés à partir du 01/01/2021 : ...') — il
+              est retourné brut pour affichage.
+        """
+        xlsx_name = FICHE_XLSX.get(secteur)
+        if not (xlsx_name and (self.rules_dir / xlsx_name).exists()):
+            return {"requise": None, "texte": None}
+        import pandas as pd
+        cache_key = f"xlsx_df:{xlsx_name}"
+        if cache_key not in self._cache:
+            self._cache[cache_key] = pd.read_excel(self.rules_dir / xlsx_name)
+        df = self._cache[cache_key]
+        fiche_base = fiche.replace("-", "").upper()
+        code_col = (df["FICHE"].astype(str).str.split("\n").str[0]
+                    .str.replace("-", "").str.strip().str.upper())
+        rows = df[code_col == fiche_base]
+        if rows.empty:
+            return {"requise": None, "texte": None}
+
+        # Filtrer par date d'engagement si fournie, sinon version la plus récente
+        row = None
+        if date_engagement:
+            try:
+                from datetime import datetime as _dt
+                d = _dt.strptime(date_engagement, "%d/%m/%Y")
+                for _, r in rows.iterrows():
+                    debut, fin = r.get("DEBUT D'APPLICATION "), r.get("FIN D'APPLICATION ")
+                    if pd.notna(debut) and debut <= d and (pd.isna(fin) or d <= fin):
+                        row = r
+                        break
+            except ValueError:
+                pass
+        if row is None:
+            row = rows.iloc[-1]  # version la plus récente par défaut
+
+        val = row.get("QUALIFICATION DU PROFESSIONNEL")
+        texte = str(val).strip() if pd.notna(val) and str(val).strip() else None
+        if texte is None or "non obligatoire" in texte.lower():
+            return {"requise": False, "texte": texte}
+        return {"requise": True, "texte": texte}
+
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -461,6 +513,7 @@ class RuleLoader:
             ]
             mentions_obligatoires_raw = None
             mentions_necessaires_raw = None
+            qualification_presente = False
             for col, label in field_labels:
                 val = row.get(col)
                 if pd.notna(val) and str(val).strip():
@@ -469,6 +522,19 @@ class RuleLoader:
                         mentions_obligatoires_raw = str(val).strip()
                     elif col == "MENTION NON OBLIGATOIRE SUR LA PREUVE DE REALISAITON MAIS NECESSAIRE":
                         mentions_necessaires_raw = str(val).strip()
+                    elif col == "QUALIFICATION DU PROFESSIONNEL":
+                        qualification_presente = True
+
+            # RGE non requise : quand la colonne QUALIFICATION est vide pour cette
+            # version, le dire EXPLICITEMENT à Claude — sinon les règles générales
+            # de regles_rge.md le pousseraient à exiger un certificat RGE à tort
+            # (55 versions sur 132 du référentiel BAR ne l'exigent pas).
+            if not qualification_presente:
+                lines.append("**Qualification du professionnel requise** :\n"
+                             "▪ AUCUNE qualification RGE n'est exigée pour cette fiche/version. "
+                             "L'axe RGE doit être évalué 'non requis' : contrôles RGE marqués "
+                             "conformes avec la mention 'non requis pour cette fiche', et "
+                             "l'absence de certificat RGE n'est PAS une anomalie.")
 
             if mentions_obligatoires_raw:
                 checklist = build_fields_checklist_text(mentions_obligatoires_raw, severite="obligatoire")

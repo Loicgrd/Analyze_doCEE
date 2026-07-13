@@ -35,6 +35,18 @@ from utils.extractor import smart_truncate
 
 _VERDICT_ENUM = ["VALIDE", "NON VALIDE", "INCOMPLET"]
 
+# ---------------------------------------------------------------------------
+# Tarifs utilisés pour les ESTIMATIONS (dry-run + affichage app), en $/MTok.
+# Valeurs = tarif STANDARD de claude-sonnet-5 (applicable à partir du
+# 01/09/2026, identique au tarif Sonnet 4.6). Jusqu'au 31/08/2026, le tarif
+# de lancement de Sonnet 5 est de 2$/10$ : les estimations ci-dessous
+# SURESTIMENT donc le coût réel d'environ 33% pendant cette période — choix
+# volontairement conservateur pour ne pas sous-budgéter après le 31/08.
+# ---------------------------------------------------------------------------
+PRICE_INPUT_USD_MTOK = 3.0
+PRICE_OUTPUT_USD_MTOK = 15.0
+PRICE_CACHE_READ_USD_MTOK = 0.3  # 10% du tarif input
+
 _ELEMENT_TECHNIQUE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -169,6 +181,43 @@ AUDIT_TOOL_SCHEMA = {
                                  "version — ajoute une anomalie explicite 'VERSION DE FICHE À REVÉRIFIER' "
                                  "et le statut global ne peut alors pas être VALIDE (au mieux INCOMPLET)."),
             },
+            "date_realisation": {
+                "type": ["string", "null"],
+                "description": ("Date de réalisation/achèvement des travaux (JJ/MM/AAAA) identifiée sur "
+                                 "la PREUVE DE RÉALISATION : date d'achèvement des travaux si mentionnée, "
+                                 "sinon date de la facture finale ou du DGD. null si introuvable. "
+                                 "Rappel : elle doit être POSTÉRIEURE à la date d'engagement — sinon, "
+                                 "anomalie majeure à signaler."),
+            },
+            "professionnel_realisation": {
+                "type": ["string", "null"],
+                "description": ("Identité du professionnel ayant RÉALISÉ les travaux, telle qu'elle "
+                                 "figure sur la PREUVE DE RÉALISATION : raison sociale + SIRET si "
+                                 "disponible (ex: 'SOPREMA ENTREPRISES — SIRET 485 197 552 00071'). "
+                                 "null si non identifiable."),
+            },
+            "sous_traitant": {
+                "type": ["string", "null"],
+                "description": ("Raison sociale + SIRET du SOUS-TRAITANT si les travaux ont été "
+                                 "sous-traités (mention explicite sur la facture, le BC ou l'AH). "
+                                 "null si pas de sous-traitance. RAPPEL : en cas de sous-traitance, "
+                                 "c'est le sous-traitant qui doit porter la qualification RGE quand "
+                                 "la fiche l'exige."),
+            },
+            "adresse_travaux": {
+                "type": ["string", "null"],
+                "description": ("Adresse complète du LIEU DES TRAVAUX telle que mentionnée sur la "
+                                 "preuve de réalisation — à recouper avec l'adresse du document "
+                                 "d'engagement (une divergence est une anomalie de cohérence). "
+                                 "null si introuvable."),
+            },
+            "montant_ht": {
+                "type": ["string", "null"],
+                "description": ("Montant total HT des travaux sur la preuve de réalisation (ex: "
+                                 "'92 646,00 €'). Sert au LIEN FORT engagement ↔ réalisation : doit "
+                                 "correspondre au montant du document d'engagement (ou s'expliquer : "
+                                 "avenants, révision de prix...). null si introuvable."),
+            },
             "anomalies": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -187,7 +236,9 @@ AUDIT_TOOL_SCHEMA = {
                 "description": "Résumé libre de 4 à 8 phrases pour une lecture humaine rapide : fiche(s), verdict global, points bloquants principaux.",
             },
         },
-        "required": ["fiches", "axes", "date_engagement_confirmee", "statut_global", "synthese_narrative"],
+        "required": ["fiches", "axes", "date_engagement_confirmee", "date_realisation",
+                      "professionnel_realisation", "sous_traitant", "adresse_travaux",
+                      "statut_global", "synthese_narrative"],
     },
 }
 
@@ -368,23 +419,40 @@ def dry_run(
     core_chars = len(prompt["core_block"])
     var_chars = len(prompt["variable_block"])
 
-    system_tk = system_chars // 4
-    core_tk = core_chars // 4
-    var_tk = var_chars // 4
+    # Facteurs de calibration du tokenizer Sonnet 5, MESURÉS sur un appel réel
+    # (dossier T249185, 07/2026) en comparant l'estimation chars/4 aux tokens
+    # facturés par l'API :
+    #   - blocs de PROSE française (system + socle de règles + schéma outil) :
+    #     facturé 1,35x l'estimation chars/4 (borne haute documentée par
+    #     Anthropic pour la prose avec le nouveau tokenizer) ;
+    #   - bloc VARIABLE (documents extraits + référentiel structuré) : 0,9x —
+    #     le nouveau tokenizer est légèrement plus efficace sur le contenu
+    #     structuré ; on garde 1,0 par prudence.
+    _F_PROSE = 1.35
+    _F_VARIABLE = 1.0
+
+    system_tk = int(system_chars // 4 * _F_PROSE)
+    core_tk = int(core_chars // 4 * _F_PROSE)
+    var_tk = int(var_chars // 4 * _F_VARIABLE)
     # Le schéma de l'outil est envoyé à chaque appel comme les autres blocs input.
-    schema_tk = len(str(AUDIT_TOOL_SCHEMA)) // 4
+    schema_tk = int(len(str(AUDIT_TOOL_SCHEMA)) // 4 * _F_PROSE)
     total_input_tk = system_tk + core_tk + var_tk + schema_tk
 
-    # Estimation coût — 1er appel (cache write) vs appels suivants (cache read)
-    # Le schéma de l'outil n'est pas mis en cache (pas marqué cache_control).
-    cost_first_usd = (total_input_tk * 3) / 1_000_000
-    cost_cached_usd = ((system_tk + core_tk) * 0.3 + (var_tk + schema_tk) * 3) / 1_000_000
-    # Sortie structurée généralement un peu plus dense que la prose équivalente,
-    # et proportionnelle au nombre de fiches détectées.
+    # Estimation coût — 1er appel (cache write, facturé 1,25x le tarif input)
+    # vs appels suivants (cache read à 0,1x). Le préfixe caché couvre le schéma
+    # d'outil + system + socle (tout ce qui précède le point de rupture cache).
+    cached_prefix_tk = system_tk + core_tk + schema_tk
+    cost_first_usd = (cached_prefix_tk * PRICE_INPUT_USD_MTOK * 1.25
+                       + var_tk * PRICE_INPUT_USD_MTOK) / 1_000_000
+    cost_cached_usd = (cached_prefix_tk * PRICE_CACHE_READ_USD_MTOK
+                        + var_tk * PRICE_INPUT_USD_MTOK) / 1_000_000
+    # Sortie : calibrée sur appel réel Sonnet 5 (T249185 : 5 239 tk pour 1 fiche,
+    # soit ~2x l'ancienne estimation) — l'adaptive thinking, activé par défaut,
+    # est facturé en tokens de sortie et double environ le volume.
     n_fiches = max(1, len(classification.get("fiches", ["1"])))
-    output_tk_est = 1800 + n_fiches * 700
-    cost_first_usd += (output_tk_est * 15) / 1_000_000
-    cost_cached_usd += (output_tk_est * 15) / 1_000_000
+    output_tk_est = (1800 + n_fiches * 700) * 2
+    cost_first_usd += (output_tk_est * PRICE_OUTPUT_USD_MTOK) / 1_000_000
+    cost_cached_usd += (output_tk_est * PRICE_OUTPUT_USD_MTOK) / 1_000_000
 
     return {
         "prompt_system": prompt["system"],
@@ -414,7 +482,7 @@ def analyze_with_claude(
     core_rules_text: str = None,
     variable_rules_text: str = None,
     verbose: bool = False,
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-sonnet-5",  # tarif de lancement 2$/10$ par MTok jusqu au 31/08/2026, puis 3$/15$ (= tarif Sonnet 4.6)
     max_tokens: int = 6000,
     api_key: str = None,
 ) -> Dict[str, Any]:

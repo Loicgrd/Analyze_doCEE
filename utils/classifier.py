@@ -145,7 +145,7 @@ CLASSIFY_TOOL_SCHEMA = {
 
 def classify_dossier_ia(
     docs: Dict[str, dict],
-    model: str = "claude-sonnet-4-6",
+    model: str = "claude-sonnet-5",  # tarif de lancement 2$/10$ par MTok jusqu au 31/08/2026, puis 3$/15$ (= tarif Sonnet 4.6)
     correspondance_table: str = "",
     max_chars_per_doc: int = 6000,  # marge suffisante pour préserver 2-3 fiches via smart_truncate
     max_chars_facture: int = 12000,  # budget élargi : c'est le document le plus fiable/descriptif
