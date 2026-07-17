@@ -174,6 +174,7 @@ def afficher_resultats(data: dict, rules_path) -> None:
         }.get(classification.get("type_engagement", "inconnu"), "?")
 
         delai_str, incoherence_dates = "—", False
+        realisation_perimee, age_realisation = False, None
         if date_eng and date_rea:
             try:
                 from datetime import datetime as _dt
@@ -184,6 +185,13 @@ def afficher_resultats(data: dict, rules_path) -> None:
                 incoherence_dates = _delai < 0
             except ValueError:
                 delai_str = "format ?"
+        if date_rea:
+            try:
+                from datetime import datetime as _dt
+                age_realisation = (_dt.today() - _dt.strptime(date_rea, "%d/%m/%Y")).days
+                realisation_perimee = age_realisation > 365
+            except ValueError:
+                pass
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Date d'engagement", date_eng or "❌ Introuvable",
@@ -215,6 +223,42 @@ def afficher_resultats(data: dict, rules_path) -> None:
             st.warning(f"**Sous-traitance détectée :** {sous_t} — en cas de "
                        f"sous-traitance, c'est le sous-traitant qui doit porter la "
                        f"qualification RGE quand la fiche l'exige.", icon="🔩")
+
+        # --- Constat visuel signatures/tampons (passe vision dédiée) ---
+        _sig = data.get("verification_signatures")
+        if _sig:
+            if _sig.get("erreur"):
+                st.caption(f"🖋️ Vérification visuelle des signatures indisponible : "
+                           f"{_sig['erreur']}")
+            else:
+                for pg in _sig.get("pages", []):
+                    s_ok = pg.get("signature_manuscrite_presente")
+                    t_ok = pg.get("tampon_present")
+                    if not s_ok and not t_ok:
+                        icone, constat = "❌", "aucune signature manuscrite ni tampon visibles"
+                    elif s_ok and t_ok:
+                        icone, constat = "✅", "signature manuscrite + tampon visibles"
+                    elif s_ok:
+                        icone, constat = "🟡", "signature manuscrite visible, pas de tampon"
+                    else:
+                        icone, constat = "🟡", "tampon visible, pas de signature manuscrite"
+                    detail = []
+                    if pg.get("bloc"):
+                        detail.append(f"bloc « {pg['bloc']} »")
+                    if pg.get("date_manuscrite_ou_tamponnee"):
+                        detail.append(f"datée du {pg['date_manuscrite_ou_tamponnee']}")
+                    if pg.get("commentaire"):
+                        detail.append(pg["commentaire"])
+                    st.markdown(
+                        f"**🖋️ Signature/tampon (vision)** — "
+                        f"{pg.get('document', '?')} p.{pg.get('page', '?')} : "
+                        f"{icone} {constat}"
+                        + (f" ({' · '.join(detail)})" if detail else "")
+                    )
+                st.caption("Constat par vision (lecture d'image), indépendant de "
+                           "l'extraction de texte — la date manuscrite/tamponnée "
+                           "peut servir de date d'engagement (règle : date du "
+                           "document ou date de signature du MOA).")
 
         # --- RGE : affichée seulement si la fiche/version l'exige ---
         # (colonne 'QUALIFICATION DU PROFESSIONNEL' du récap xlsx : 55
@@ -253,6 +297,29 @@ def afficher_resultats(data: dict, rules_path) -> None:
             st.error("🚨 La date de réalisation est ANTÉRIEURE à la date "
                      "d'engagement — incohérence majeure (travaux engagés après "
                      "leur réalisation ?). À vérifier en priorité absolue.", icon="🚨")
+        if realisation_perimee:
+            st.error(f"🚨 DOSSIER NON ÉLIGIBLE — la date de réalisation "
+                     f"({date_rea}) date de {age_realisation} jours, soit plus "
+                     f"de 12 mois par rapport à la date du jour (règle "
+                     f"`regles_realisation.md` : la réalisation doit dater de "
+                     f"moins de 12 mois à la date d'analyse). Contrôle "
+                     f"déterministe calculé en Python, indépendant de l'IA.",
+                     icon="🚨")
+
+        # --- Catégorisation des documents (engagement vs réalisation) ---
+        docs_eng = data.get("audit", {}).get("documents_engagement") or []
+        docs_rea = data.get("audit", {}).get("documents_realisation") or []
+        if docs_eng or docs_rea:
+            st.caption(
+                f"**Documents d'engagement** (source exclusive de la date "
+                f"d'engagement) : {', '.join(docs_eng) or '❌ aucun identifié'} · "
+                f"**Preuves de réalisation** (source des éléments techniques) : "
+                f"{', '.join(docs_rea) or '❌ aucune identifiée'}"
+            )
+            if not docs_eng:
+                st.warning("Aucun document d'engagement identifié dans le dossier — "
+                           "la date d'engagement ne peut pas être établie de façon "
+                           "probante.", icon="⚠️")
 
         # =====================================================
         # 2. ÉLÉMENTS TECHNIQUES DES TRAVAUX (toujours visibles)
@@ -401,6 +468,41 @@ def afficher_resultats(data: dict, rules_path) -> None:
         st.text(data.get("analyse", "(vide)"))
 
     st.divider()
+
+    # --- Documents annotés (surlignages des éléments de l'audit) ---
+    pdfs_annotes = st.session_state.get("pdfs_annotes")
+    st.subheader("📑 Documents annotés")
+    if pdfs_annotes:
+        st.caption(
+            "Les citations et valeurs clés ayant servi à l'audit sont surlignées "
+            "dans les documents : 🟩 conforme · 🟨 présent (conformité non "
+            "applicable) · 🟥 non conforme · 🟦 valeurs clés (dates, montant, "
+            "SIRET, adresse). Survolez un surlignage dans votre lecteur PDF "
+            "pour voir l'élément correspondant."
+        )
+        role_labels = {"engagement": "📝 Engagement", "realisation": "🔧 Réalisation",
+                        "autre": "📄 Autre"}
+        cols = st.columns(min(3, max(1, len(pdfs_annotes))))
+        for i, (name, info) in enumerate(pdfs_annotes.items()):
+            with cols[i % len(cols)]:
+                if info.get("bytes"):
+                    st.download_button(
+                        label=f"⬇️ {name}",
+                        data=info["bytes"],
+                        file_name=f"annote_{name}",
+                        mime="application/pdf",
+                        key=f"dl_annot_{i}",
+                    )
+                    st.caption(f"{role_labels.get(info.get('role'), '📄')} · "
+                               f"{info.get('n_annotations', 0)} surlignage(s)")
+                else:
+                    st.caption(f"❌ {name} : annotation impossible "
+                               f"({info.get('erreur', '?')})")
+    else:
+        st.caption("Disponibles après une analyse complète. Pour une analyse "
+                   "importée en JSON : déposez aussi le ZIP du dossier ci-dessus, "
+                   "puis utilisez le bouton d'annotation qui apparaîtra.")
+
     st.download_button(
         label="⬇️ Télécharger le résultat (JSON)",
         data=json.dumps(data, ensure_ascii=False, indent=2),
@@ -716,6 +818,39 @@ if uploaded:
                 "audit": result.get("audit", {}),
             }
 
+            # --- Passe VISION signatures/tampons sur le(s) document(s)
+            # d'engagement : comble la limite structurelle de l'extraction
+            # texte (une signature manuscrite n'existe pas dans le texte).
+            # Appel API séparé, minuscule (~1 600 tk/page d'image, effort
+            # low, ~0,01 €), sans corpus de règles.
+            try:
+                from utils.vision_signatures import (check_signatures,
+                                                      selectionner_docs_engagement)
+                _docs_eng = selectionner_docs_engagement(
+                    pdf_files, result.get("audit", {}) or {})
+                if _docs_eng:
+                    with st.status("🖋️ Vérification visuelle des signatures/"
+                                    "tampons (vision)…", expanded=False):
+                        _sig = check_signatures(_docs_eng)
+                    st.session_state["analyse_resultat"]["verification_signatures"] = _sig
+            except Exception as _e:
+                st.session_state["analyse_resultat"]["verification_signatures"] = {
+                    "erreur": str(_e)}
+
+            # --- PDF annotés : surligner dans les documents les citations et
+            # valeurs clés ayant servi à l'audit. Zéro token API (recherche
+            # locale des citations verbatim déjà retournées) ; le seul coût
+            # est du temps local (OCR de localisation pour les scannés).
+            try:
+                with st.status("🖍️ Annotation des PDF (surlignage des éléments "
+                                "de l'audit)…", expanded=False):
+                    from utils.annotator import annotate_dossier
+                    st.session_state["pdfs_annotes"] = annotate_dossier(
+                        pdf_files, result.get("audit", {}) or {})
+            except Exception as _e:
+                st.session_state["pdfs_annotes"] = None
+                st.warning(f"Annotation des PDF impossible : {_e}", icon="⚠️")
+
 # ══════════════════════════════════════════════════════════════════════
 # AFFICHAGE DES RÉSULTATS — hors du bloc 'run' : rendu depuis
 # session_state à CHAQUE rerun, donc le clic sur Télécharger (qui
@@ -726,6 +861,25 @@ if st.session_state.get("analyse_resultat"):
     st.divider()
     _data = st.session_state["analyse_resultat"]
     st.markdown(f"#### 📄 Résultats — `{_data.get('fichier', '?')}`")
+
+    # Analyse importée (JSON) + ZIP déposé mais pas encore annoté : proposer
+    # l'annotation locale des PDF avec les citations de cette analyse.
+    if uploaded and not st.session_state.get("pdfs_annotes"):
+        if st.button("🖍️ Annoter les documents du ZIP avec cette analyse",
+                      key="btn_annoter_import"):
+            try:
+                with st.status("🖍️ Annotation des PDF…", expanded=False):
+                    import tempfile
+                    from utils.extractor import extract_zip
+                    from utils.annotator import annotate_dossier
+                    _tmp = tempfile.mkdtemp(prefix="annot_")
+                    _pdfs = extract_zip(uploaded, _tmp)
+                    st.session_state["pdfs_annotes"] = annotate_dossier(
+                        _pdfs, _data.get("audit", {}) or {})
+                st.rerun()
+            except Exception as _e:
+                st.warning(f"Annotation impossible : {_e}", icon="⚠️")
+
     afficher_resultats(_data, rules_path)
 
 if not uploaded and not st.session_state.get("analyse_resultat"):
