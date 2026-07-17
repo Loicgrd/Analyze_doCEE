@@ -155,6 +155,48 @@ def match_field(line: str) -> Optional[str]:
     return None
 
 
+# Conjonction "marque et référence" / "marque, référence" (pluriels inclus)
+_MARQUE_REF_CONJ = re.compile(r"marques?\s*(?:et|,)\s*r[ée]f[ée]rences?")
+# Disjonction : la présence d'un "ou" dans la ligne signale une ALTERNATIVE
+# ("classe OU marque et référence", "etas OU marque et référence de la PAC",
+# "Marque et références de ces éléments OU le type hygroréglable...") — la
+# scinder casserait la sémantique "l'un des deux suffit".
+_DISJONCTION = re.compile(r"\bou\b")
+
+
+def match_fields_multi(line: str) -> List[str]:
+    """
+    Comme match_field, mais peut retourner PLUSIEURS champs atomiques pour une
+    même mention. Cas traité : « Marque et référence de X » est scindé en deux
+    champs distincts `marque` + `reference` — sur le terrain, il est fréquent
+    qu'un seul des deux figure sur la facture, et un point unique
+    `marque_reference` ne permettait pas de savoir LEQUEL manque.
+
+    Règles :
+    - Ligne avec disjonction (« ou ») -> comportement historique inchangé
+      (un seul champ, ex: marque_reference) : c'est une alternative, pas une
+      double exigence.
+    - Conjonction pure « marque et/,' référence [de X] » -> ['marque',
+      'reference'], plus tout autre champ conjoint détecté sur le reste de la
+      ligne (ex: « Marque, référence et épaisseur de l'isolant » ->
+      ['marque', 'reference', 'epaisseur_mm'] — l'épaisseur était auparavant
+      avalée par le match unique marque_reference).
+    - Sinon -> [match_field(line)] (ou [] si aucun match).
+    """
+    line_low = line.lower()
+    m = _MARQUE_REF_CONJ.search(line_low)
+    if m and not _DISJONCTION.search(line_low):
+        fields = ["marque", "reference"]
+        # Chercher d'éventuels attributs conjoints sur le reste de la ligne
+        residual = (line_low[:m.start()] + " " + line_low[m.end():]).strip()
+        extra = match_field(residual) if len(residual) > 3 else None
+        if extra and extra not in fields:
+            fields.append(extra)
+        return fields
+    single = match_field(line)
+    return [single] if single else []
+
+
 def build_schema_for_fiche(mentions_obligatoires: str) -> Dict[str, dict]:
     """
     Construit le schéma JSON (format "properties" JSON Schema) des champs
@@ -235,7 +277,7 @@ _STOPWORDS_SUFFIXE = {
 
 
 def _suffixe_depuis_ligne(line: str, max_mots: int = 2) -> str:
-    """Dérive un court suffixe lisible (snake_case) depuis une ligne source,
+    """Dérive un court suffixe lisible (snake_case ASCII) depuis une ligne source,
     pour désambiguïser deux occurrences d'un même champ atomique au sein
     d'une fiche (ex: "nombre_unites__caissons" vs "nombre_unites__bouches_extraction").
 
@@ -245,6 +287,11 @@ def _suffixe_depuis_ligne(line: str, max_mots: int = 2) -> str:
     dans le nom du champ atomique lui-même et n'apportent aucune distinction).
     """
     import re as _re
+    import unicodedata as _ud
+
+    def _ascii(s: str) -> str:
+        # 'régulateurs' -> 'regulateurs' : les noms de champs restent en ASCII
+        return _ud.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
 
     # Mots déjà présents dans le vocabulaire des noms de champs eux-mêmes
     # (marque, référence, classe, nombre...) : jamais distinctifs en tant
@@ -260,12 +307,12 @@ def _suffixe_depuis_ligne(line: str, max_mots: int = 2) -> str:
     if m:
         candidat = next(g for g in m.groups() if g)
         if candidat not in mots_generiques and len(candidat) > 2:
-            return candidat
+            return _ascii(candidat)
 
     # Repli : mots non génériques/non vides de la ligne, dans l'ordre
     words = _re.findall(r"[a-zàâäéèêëïîôöùûüç]+", line_low)
     words = [w for w in words if w not in _STOPWORDS_SUFFIXE and w not in mots_generiques and len(w) > 2]
-    return "_".join(words[:max_mots]) or "autre"
+    return _ascii("_".join(words[:max_mots])) or "autre"
 
 
 def build_fields_checklist_text(mentions_obligatoires: str, severite: str = "obligatoire") -> str:
@@ -304,16 +351,23 @@ def build_fields_checklist_text(mentions_obligatoires: str, severite: str = "obl
     if not mentions_obligatoires:
         return ""
 
-    # 1er passage : regrouper les lignes par champ atomique détecté
+    # 1er passage : regrouper les lignes par champ atomique détecté.
+    # match_fields_multi peut retourner PLUSIEURS champs pour une même ligne
+    # (« Marque et référence de X » -> marque + reference, séparés pour savoir
+    # lequel des deux manque quand un seul figure sur la facture).
     by_field: Dict[str, List[str]] = {}
     unmatched = []
+    split_marque_ref = False
     for line in mentions_obligatoires.split("\n"):
         line = line.strip().lstrip("▪").strip()
         if not line or len(line) < 3:
             continue
-        field = match_field(line)
-        if field:
-            by_field.setdefault(field, []).append(line)
+        fields = match_fields_multi(line)
+        if fields:
+            if "marque" in fields and "reference" in fields:
+                split_marque_ref = True
+            for field in fields:
+                by_field.setdefault(field, []).append(line)
         else:
             unmatched.append(line)
 
@@ -366,5 +420,14 @@ def build_fields_checklist_text(mentions_obligatoires: str, severite: str = "obl
                           "(à mettre dans `elements_techniques` avec ce libellé exact comme `champ`) :")
         for u in unmatched:
             lines_out.append(f"- {u}")
+
+    if split_marque_ref:
+        lines_out.append(
+            "\nNB : les mentions « marque et référence » de cette fiche sont volontairement "
+            "SCINDÉES en deux champs distincts (`marque` / `reference`) : évalue la présence "
+            "de CHACUN séparément — il est fréquent qu'un seul des deux figure sur la facture, "
+            "et le vérificateur doit savoir précisément LEQUEL manque. Ne fusionne pas les "
+            "deux dans un seul élément, et ne déduis jamais l'un de la présence de l'autre."
+        )
 
     return "\n".join(lines_out)

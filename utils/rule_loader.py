@@ -198,32 +198,60 @@ class RuleLoader:
 
     def get_fiche_correspondance_table(self) -> str:
         """
-        Génère la table 'code fiche -> libellé des travaux' à partir des CSV
-        Fiche BAR/BAT — utilisée pour la classification IA, afin que le modèle
-        s'appuie sur la nomenclature officielle plutôt que sur sa mémoire générale.
+        Génère la table 'code fiche -> libellé des travaux' — garde-fou
+        ESSENTIEL de la classification IA : sans elle, le modèle s'appuie sur
+        sa mémoire générale des fiches CEE et peut inverser des codes voisins
+        (cas réel observé : combles classés BAR-EN-103 'plancher bas' au lieu
+        de BAR-EN-101, et BAR-EN-102 'murs' écarté comme 'toitures terrasses').
+
+        Source PRIMAIRE : le xlsx récapitulatif (même fichier que les règles,
+        donc présent dès que l'audit fonctionne). Les CSV ne servent plus que
+        de secours si le xlsx manque — l'ancienne implémentation ne lisait QUE
+        les CSV et retournait silencieusement vide quand ils n'étaient pas
+        déployés (_table_utilisee: false).
         """
         import csv
         import io
         import re
 
         lines_out = []
-        for secteur, filename in FICHE_CSV.items():
-            text = self._read_file(filename, encoding="latin-1")
-            if not text:
-                continue
-            reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=";")
+        code_re = re.compile(r"(BA[RT]-(?:EN|TH|EQ|SE)-\d+)")
+
+        for secteur in FICHE_XLSX.keys() | FICHE_CSV.keys():
             seen = {}
-            for row in reader:
-                fiche_raw = (row.get("FICHE") or "").strip()
-                travaux = (row.get("TRAVAUX") or "").strip()
-                if not fiche_raw or not travaux:
-                    continue
-                m = re.match(r"(BA[RT]-(?:EN|TH)-\d+)", fiche_raw.upper())
-                if not m:
-                    continue
-                code = m.group(1)
-                if code not in seen:
-                    seen[code] = travaux
+
+            # 1) Source primaire : xlsx
+            xlsx_name = FICHE_XLSX.get(secteur)
+            if xlsx_name and (self.rules_dir / xlsx_name).exists():
+                import pandas as pd
+                cache_key = f"xlsx_df:{xlsx_name}"
+                if cache_key not in self._cache:
+                    self._cache[cache_key] = pd.read_excel(self.rules_dir / xlsx_name)
+                df = self._cache[cache_key]
+                for _, row in df.iterrows():
+                    fiche_raw = str(row.get("FICHE") or "").strip()
+                    travaux = str(row.get("TRAVAUX") or "").strip()
+                    if not fiche_raw or not travaux or travaux.lower() == "nan":
+                        continue
+                    m = code_re.match(fiche_raw.upper())
+                    if m and m.group(1) not in seen:
+                        seen[m.group(1)] = travaux
+
+            # 2) Secours : CSV (complète les codes éventuellement absents du xlsx)
+            csv_name = FICHE_CSV.get(secteur)
+            if csv_name:
+                text = self._read_file(csv_name, encoding="latin-1")
+                if text:
+                    reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=";")
+                    for row in reader:
+                        fiche_raw = (row.get("FICHE") or "").strip()
+                        travaux = (row.get("TRAVAUX") or "").strip()
+                        if not fiche_raw or not travaux:
+                            continue
+                        m = code_re.match(fiche_raw.upper())
+                        if m and m.group(1) not in seen:
+                            seen[m.group(1)] = travaux
+
             for code, travaux in sorted(seen.items()):
                 lines_out.append(f"- {code} ({secteur}) : {travaux}")
 

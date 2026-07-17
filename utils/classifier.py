@@ -59,6 +59,20 @@ complémentaire utile, mais PAS une vérité à recopier aveuglément :
 - Si un code trouvé sur l'AH/VISA ne correspond à AUCUN travail décrit sur
   la facture, ne le retiens pas : la nature réelle des travaux facturés prime
   toujours sur une mention déclarative isolée.
+
+RÈGLE ABSOLUE SUR LA CORRESPONDANCE CODE ↔ TRAVAUX : ta connaissance générale
+des numéros de fiche est SUSPECTE — des fiches voisines (BAR-EN-101/102/103...)
+sont facilement confondues de mémoire. La correspondance entre un numéro de
+fiche et un type de travaux fait foi UNIQUEMENT via la nomenclature officielle
+fournie ci-dessous quand elle est présente. En particulier :
+- Ne substitue JAMAIS un code explicitement écrit dans les documents par un
+  code voisin sur la base de ta mémoire ("le code X repéré ne correspond pas,
+  ce doit être Y") : soit tu confirmes le code trouvé car les travaux décrits
+  correspondent à son libellé DANS LA NOMENCLATURE, soit tu l'écartes comme
+  mention déclarative en citant la preuve — mais tu ne le remplaces pas.
+- Si la nomenclature n'est PAS fournie et que des codes explicites ont été
+  repérés dans les documents, retiens ces codes tels quels (confiance
+  'moyenne' maximum) plutôt que de les re-mapper de mémoire.
 {table_block}
 Termine TOUJOURS par UN SEUL appel à l'outil "classifier_dossier_cee" avec le
 résultat structuré. Ne produis pas de texte libre en dehors de cet appel.
@@ -243,6 +257,12 @@ def classify_dossier_ia(
             messages=[{"role": "user", "content": user_prompt}],
             tools=[CLASSIFY_TOOL_SCHEMA],
             tool_choice={"type": "tool", "name": "classifier_dossier_cee"},
+            # Effort BAS : la classification est une tâche simple (cas d'usage
+            # documenté pour 'low'), déjà sécurisée par le hint regex, la table
+            # de correspondance et le champ 'confiance'. À effort réduit, le
+            # modèle peut sauter le thinking (facturé en output) -> appel
+            # nettement plus rapide et moins cher, sans perte mesurable ici.
+            output_config={"effort": "low"},
         )
         result = None
         for block in response.content:

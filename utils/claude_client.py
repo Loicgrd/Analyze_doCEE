@@ -483,6 +483,11 @@ def analyze_with_claude(
     variable_rules_text: str = None,
     verbose: bool = False,
     model: str = "claude-sonnet-5",  # tarif de lancement 2$/10$ par MTok jusqu au 31/08/2026, puis 3$/15$ (= tarif Sonnet 4.6)
+    effort: str = "high",  # profondeur de raisonnement adaptatif : low|medium|high|xhigh|max.
+    # "high" (défaut API) recommandé pour l audit : les recoupements croisés multi-documents,
+    # l arbitrage de version et les comparaisons de seuils bénéficient directement du thinking.
+    # "medium" = plus rapide et moins cher (thinking facturé en output), à ne descendre
+    # qu après validation sur le harnais d éval (eval/run_eval.py).
     max_tokens: int = 6000,
     api_key: str = None,
 ) -> Dict[str, Any]:
@@ -541,6 +546,7 @@ def analyze_with_claude(
                 messages=[{"role": "user", "content": user_content}],
                 tools=[AUDIT_TOOL_SCHEMA],
                 tool_choice={"type": "tool", "name": "produire_audit_cee"},
+                output_config={"effort": effort},
             )
         except anthropic.RateLimitError:
             if attempt < 3:
