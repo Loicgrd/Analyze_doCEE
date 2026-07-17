@@ -102,7 +102,9 @@ MAPPING: List[Tuple[str, str]] = [
 FIELD_DESCRIPTIONS: Dict[str, str] = {
     "marque_reference": "Marque et référence du produit/équipement (valeur combinée)",
     "marque": "Marque du produit/équipement",
-    "reference": "Référence exacte du produit/équipement",
+    "reference": ("Référence commerciale exacte du produit/équipement (nom de gamme/modèle). "
+                   "NE JAMAIS y inclure le numéro ACERMI ni aucun numéro de certification — "
+                   "ils vont dans le champ distinct `certification_acermi`"),
     "type_produit": "Type ou modèle du produit/équipement",
     "surface_habitable_m2": "Surface habitable du logement (m²)",
     "surface_m2": "Surface (isolant, capteurs, menuiseries...) en m²",

@@ -170,16 +170,36 @@ AUDIT_TOOL_SCHEMA = {
                 },
                 "required": ["logique_globale", "engagement", "realisation_documentaire", "rge", "ah", "coherence"],
             },
+            "documents_engagement": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": ("Noms des documents du dossier jouant le rôle de PREUVE "
+                                 "D'ENGAGEMENT (BC, OS, acte d'engagement, devis signé...). "
+                                 "La date d'engagement ne peut être lue QUE sur ces documents."),
+            },
+            "documents_realisation": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": ("Noms des documents jouant le rôle de PREUVE DE RÉALISATION "
+                                 "(facture finale, DGD, décompte...). Les éléments techniques "
+                                 "doivent être vérifiés sur ces documents."),
+            },
             "date_engagement_confirmee": {
                 "type": ["string", "null"],
-                "description": ("Date d'engagement (JJ/MM/AAAA) que TU as identifiée toi-même dans les "
-                                 "documents, indépendamment du 'CONTEXTE PRÉ-ANALYSÉ'. null si réellement "
-                                 "introuvable. IMPÉRATIF : si cette date diffère de celle du contexte "
-                                 "pré-analysé, OU si elle sort de la période d'application de la version "
-                                 "de fiche chargée dans les règles (périodes listées dans le bloc de "
-                                 "règles), les seuils vérifiés proviennent potentiellement de la MAUVAISE "
-                                 "version — ajoute une anomalie explicite 'VERSION DE FICHE À REVÉRIFIER' "
-                                 "et le statut global ne peut alors pas être VALIDE (au mieux INCOMPLET)."),
+                "description": ("Date d'engagement (JJ/MM/AAAA) lue EXCLUSIVEMENT sur un "
+                                 "document d'engagement (documents_engagement) : date du document "
+                                 "lui-même ou date de signature du MOA, selon la règle propre au "
+                                 "type de document (regles_engagement.md). INTERDIT : sourcer "
+                                 "cette date depuis un RAPPEL sur la preuve de réalisation (ex: "
+                                 "'suite devis n°X du JJ/MM/AAAA' imprimé sur la facture) — c'est "
+                                 "une mention déclarative, pas une preuve. Si la date n'est "
+                                 "lisible QUE via un tel rappel, mets-la à null et signale en "
+                                 "anomalie 'date d'engagement non vérifiable sur le document "
+                                 "d'engagement (uniquement rappelée sur la preuve de "
+                                 "réalisation)'. IMPÉRATIF : si la date retenue diffère de celle "
+                                 "du contexte pré-analysé, OU sort de la période de la version de "
+                                 "fiche chargée, ajoute l'anomalie 'VERSION DE FICHE À "
+                                 "REVÉRIFIER' — statut au mieux INCOMPLET."),
             },
             "date_realisation": {
                 "type": ["string", "null"],
@@ -236,7 +256,8 @@ AUDIT_TOOL_SCHEMA = {
                 "description": "Résumé libre de 4 à 8 phrases pour une lecture humaine rapide : fiche(s), verdict global, points bloquants principaux.",
             },
         },
-        "required": ["fiches", "axes", "date_engagement_confirmee", "date_realisation",
+        "required": ["fiches", "axes", "documents_engagement", "documents_realisation",
+                      "date_engagement_confirmee", "date_realisation",
                       "professionnel_realisation", "sous_traitant", "adresse_travaux",
                       "statut_global", "synthese_narrative"],
     },
@@ -250,6 +271,19 @@ spécialisé dans l'analyse de conformité des dossiers réglementaires.
 # PROCESSUS D'AUDIT EN DEUX TEMPS (OBLIGATOIRE)
 
 ## Temps 1 — Le cœur technique : fiche, version, éligibilité
+0. AVANT TOUT : catégorise chaque document du dossier dans "documents_engagement"
+   (BC, OS, acte d'engagement, devis signé — porteurs de la date d'engagement) ou
+   "documents_realisation" (facture finale, DGD, décompte — porteurs des éléments
+   techniques et de la date de réalisation). Cette catégorisation gouverne où
+   chaque information a le droit d'être lue : date d'engagement UNIQUEMENT sur un
+   document d'engagement, éléments techniques et date de réalisation sur la preuve
+   de réalisation. Un même renseignement rappelé sur l'autre catégorie est
+   DÉCLARATIF et ne vaut pas preuve.
+   Signatures et tampons : sur un document SCANNÉ, les signatures manuscrites et
+   tampons ne sont PAS visibles dans le texte extrait par OCR. Ne conclus JAMAIS
+   "signature absente" sur un document scanné — écris "non détectable par
+   extraction de texte, à vérifier visuellement sur l'original" (anomalie de
+   vérification, pas une non-conformité).
 1. Identifier la ou les fiches BAR/BAT applicables au(x) type(s) de travaux du dossier.
 2. Identifier la DATE D'ENGAGEMENT du dossier (sur la preuve d'engagement, ou à défaut
    le VISA). Cette date détermine la VERSION de la fiche applicable — les fiches CEE
@@ -341,6 +375,18 @@ Chaque fiche fournit deux listes d'éléments techniques distinctes :
   des composants différents (isolant, treillis, colle, régulateur, caisson,
   bouches...) -- ne jamais prendre la première valeur du bon TYPE rencontrée
   sans vérifier qu'elle concerne le bon COMPOSANT.
+- MÊME VIGILANCE POUR LES IDENTITÉS (SIRET/SIREN, raisons sociales, adresses) :
+  les EN-TÊTES de BC/factures ont souvent DEUX blocs côte à côte (client/MOA
+  d'un côté, entreprise de l'autre) que l'extraction de texte APLATIT sur les
+  mêmes lignes. Un SIRET/SIREN présent dans l'en-tête peut appartenir au MOA
+  (bailleur social, syndic...) et non à l'entreprise. Ne rattache un
+  SIRET/SIREN à une entité que si le lien est EXPLICITE (même bloc visuel,
+  libellé adjacent, pied de page légal de l'émetteur — le pied de page d'une
+  facture identifie toujours l'ÉMETTEUR). En cas de doute, signale le numéro
+  avec la mention 'entité de rattachement incertaine (mise en page à
+  vérifier)' plutôt que d'affirmer un écart de SIRET pour une société. Indice
+  de recoupement fiable : le SIRET du certificat RGE est celui du
+  professionnel.
 
 # ATTENTION PARTICULIÈRE
 - La fiche mentionnée sur le VISA est déclarative : vérifie qu'elle correspond
@@ -512,6 +558,8 @@ def analyze_with_claude(
 
     prompt = build_prompt(docs, core_rules_text, variable_rules_text, classification)
 
+    from datetime import date as _date
+    _aujourdhui = _date.today().strftime("%d/%m/%Y")
     user_content = [
         {
             "type": "text",
@@ -520,7 +568,19 @@ def analyze_with_claude(
         },
         {
             "type": "text",
-            "text": prompt["variable_block"],
+            # La date du jour est indispensable pour appliquer les règles
+            # relatives à la date d'analyse (notamment regles_realisation.md :
+            # la réalisation doit dater de MOINS DE 12 MOIS par rapport à la
+            # date du jour, sinon le dossier n'est PAS ÉLIGIBLE). Sans elle,
+            # le modèle ne peut physiquement pas appliquer ces règles.
+            # Placée dans le bloc NON caché (elle change chaque jour).
+            "text": (f"# DATE DU JOUR (date d'analyse du dossier) : {_aujourdhui}\n"
+                      f"Applique toutes les règles relatives à la date d'analyse, en "
+                      f"particulier : une date de réalisation antérieure de plus de 12 "
+                      f"mois à la date du jour rend le dossier NON ÉLIGIBLE "
+                      f"(regles_realisation.md) — statut NON VALIDE avec anomalie "
+                      f"explicite, quelle que soit la conformité technique.\n\n"
+                      + prompt["variable_block"]),
         },
     ]
 
