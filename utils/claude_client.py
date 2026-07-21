@@ -421,13 +421,25 @@ def build_prompt(
     """
     docs_text = _build_docs_section(docs)
 
+    fiches_list = classification.get('fiches', [classification.get('fiche', 'INCONNUE')])
+    n_fiches = len(fiches_list)
     context_info = f"""# CONTEXTE PRÉ-ANALYSÉ (à vérifier et corriger si besoin)
-- Fiche(s) probable(s) : {', '.join(classification.get('fiches', [classification.get('fiche', 'INCONNUE')]))}
+- Fiche(s) probable(s) : {', '.join(fiches_list)}
 - Date d'engagement détectée : {classification.get('date_engagement') or 'NON DÉTERMINÉE — à identifier impérativement dans les documents pour sélectionner la bonne version de fiche'}
 - Secteur : {classification.get('secteur', 'BAR')}
 - Type d'engagement : {classification.get('type_engagement', 'inconnu')}
 - Coup de pouce : {'Oui' if classification.get('coup_de_pouce') else 'Non'}
-- Sous-traitance : {'Oui' if classification.get('sous_traitance') else 'Non'}"""
+- Sous-traitance : {'Oui' if classification.get('sous_traitance') else 'Non'}
+
+IMPÉRATIF DOSSIER MULTI-FICHES : {n_fiches} fiche(s) {'a été' if n_fiches == 1 else 'ont été'} \
+pré-identifiée(s) ci-dessus ({', '.join(fiches_list)}). Le tableau "fiches" de ta réponse DOIT \
+contenir EXACTEMENT {n_fiches} objet(s), un par fiche listée -- ni plus, ni moins. Si tu \
+détermines en cours d'analyse qu'une fiche pré-identifiée ne correspond finalement à aucun \
+travail réel du dossier, ne l'omets PAS silencieusement : inclus quand même un objet pour elle \
+avec verdict_technique="NON VALIDE" et une anomalie expliquant pourquoi elle est écartée. Ce \
+n'est qu'une fois les {n_fiches} objets produits que la vérification de chaque fiche est \
+considérée complète -- discuter d'une fiche dans les anomalies ou la synthèse sans lui donner \
+son propre objet dans "fiches" est un résultat INCOMPLET, quand bien même le texte en parlerait."""
 
     core_block = "# RÈGLES MÉTIER CEE (SOCLE)\n\n" + (core_rules_text or "")
     variable_block = (
@@ -635,12 +647,59 @@ def analyze_with_claude(
         break
 
     audit_data = _extract_tool_use(response)
+
+    # Filet de sécurité déterministe (indépendant du prompt) : le modèle peut
+    # discuter une fiche dans la synthèse/les anomalies en prose sans lui
+    # donner d'objet dans le tableau structuré "fiches" -- observé en
+    # production sur un dossier multi-fiches où 4 fiches classifiées
+    # n'avaient produit qu'1 seul objet fiches malgré une synthèse qui les
+    # citait toutes. On compare le jeu de codes réellement retourné à celui
+    # de la classification ; en cas d'écart, UNE relance corrective ciblée
+    # (liste explicite des codes manquants) avant d'abandonner et de
+    # remonter l'écart tel quel pour affichage.
+    fiches_attendues = set(classification.get('fiches', []) or
+                            ([classification['fiche']] if classification.get('fiche') else []))
+    fiches_obtenues = {f.get('code') for f in (audit_data or {}).get('fiches', [])}
+    fiches_manquantes = sorted(fiches_attendues - fiches_obtenues)
+
+    if fiches_manquantes and audit_data:
+        if verbose:
+            print(f"   ⚠️ Fiche(s) classifiée(s) absente(s) du résultat structuré : "
+                  f"{fiches_manquantes} — relance corrective")
+        relance_content = list(user_content) + [{
+            "type": "text",
+            "text": (f"Ta réponse précédente ne contenait AUCUN objet dans \"fiches\" pour : "
+                     f"{', '.join(fiches_manquantes)}. Reproduis l'audit COMPLET, en veillant "
+                     f"cette fois à inclure un objet \"fiches\" pour CHACUNE des fiches "
+                     f"pré-identifiées, y compris {', '.join(fiches_manquantes)}."),
+        }]
+        try:
+            retry_response = client.messages.create(
+                model=model,
+                max_tokens=current_max_tokens,
+                system=[{"type": "text", "text": prompt["system"],
+                          "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": relance_content}],
+                tools=[AUDIT_TOOL_SCHEMA],
+                tool_choice={"type": "tool", "name": "produire_audit_cee"},
+                output_config={"effort": effort},
+            )
+            retry_audit = _extract_tool_use(retry_response)
+            retry_obtenues = {f.get('code') for f in (retry_audit or {}).get('fiches', [])}
+            if retry_audit and len(retry_obtenues) >= len(fiches_obtenues):
+                audit_data = retry_audit
+                fiches_manquantes = sorted(fiches_attendues - retry_obtenues)
+                response = retry_response  # pour le comptage de tokens ci-dessous
+        except Exception:
+            pass  # on garde le résultat initial, fiches_manquantes reste renseigné
+
     if audit_data:
         audit_data = verify_citations(audit_data, docs)
     usage = response.usage
 
     return {
         "audit": audit_data,
+        "fiches_manquantes": fiches_manquantes,
         "statut": audit_data.get("statut_global", "INDÉTERMINÉ") if audit_data else "INDÉTERMINÉ",
         "analyse": audit_data.get("synthese_narrative", "") if audit_data else (
             "⚠️ Réponse API tronquée (limite de tokens atteinte malgré la relance) — "
