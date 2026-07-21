@@ -308,6 +308,46 @@ def ocr_pdf_smart_meta(
     return full_text, meta
 
 
+def _extract_native_text_only(pdf_path: Path) -> str:
+    """Texte de la couche native (pdftotext), sans jugement sur sa qualité --
+    utilisé uniquement pour repêcher un éventuel résidu (ajout numérique en
+    petite police) absent de l'OCR d'un document par ailleurs traité comme
+    scanné. Jamais utilisé seul comme source principale ici."""
+    try:
+        result = subprocess.run(
+            ["pdftotext", "-layout", str(pdf_path), "-"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _normalise_pour_comparaison(s: str) -> str:
+    """Normalisation grossière (minuscule, espaces réduits) pour la
+    comparaison natif/OCR."""
+    return " ".join(s.lower().split())
+
+
+def _couverture_floue(ligne: str, ocr_norm: str) -> float:
+    """
+    Proportion (0-1) des caractères de `ligne` (normalisée, espaces retirés)
+    qui se retrouvent dans `ocr_norm` via les plus longs segments communs
+    (difflib), tolérant à la déformation OCR -- voir docstring d'appel dans
+    extract_document pour le raisonnement complet.
+    """
+    import difflib
+    import re as _re
+
+    l = _re.sub(r"[^a-z0-9]+", "", ligne.lower())
+    if len(l) < 4:
+        return 1.0  # trop court pour juger sans risque -> considéré couvert
+    ocr_c = _re.sub(r"[^a-z0-9]+", "", ocr_norm)
+    sm = difflib.SequenceMatcher(None, ocr_c, l, autojunk=False)
+    total = sum(b.size for b in sm.get_matching_blocks() if b.size >= 3)
+    return total / len(l)
+
+
 def extract_document(pdf_path: Path, max_chars_text: int = 60000,
                      max_pages_ocr: int = 6, max_chars_ocr: int = 8000) -> dict:
     """
@@ -340,6 +380,44 @@ def extract_document(pdf_path: Path, max_chars_text: int = 60000,
             max_chars_ocr = max(max_chars_ocr, 30000)
         text, meta = ocr_pdf_smart_meta(pdf_path, max_pages_ocr=max_pages_ocr,
                                         max_chars=max_chars_ocr)
+
+        # Compléter avec la couche texte NATIVE résiduelle, si elle existe.
+        # Cas réel (T233337) : un décompte scanné porte un AJOUT NUMÉRIQUE
+        # tapé par-dessus (ex: "Uw : 1,4 W/m².K - Sw : 0.5" en police 5pt,
+        # ajouté après coup) -- ce texte est un vrai objet PDF, lu parfaitement
+        # par pdftotext, mais quasi illisible pour Tesseract une fois
+        # rasterisé à petite taille : sans fusion, cet ajout (souvent la
+        # valeur clé la plus récente/corrigée) disparaissait purement et
+        # simplement.
+        #
+        # Un match EXACT par ligne normalisée est insuffisant pour décider ce
+        # qui est déjà couvert : le cas visé (T233337) coexiste avec le cas
+        # opposé (T267191) où le PDF porte une couche texte native de MAUVAISE
+        # QUALITÉ (OCR bas de gamme d'un copieur) que Tesseract, en repartant
+        # de l'image, lit MIEUX -- dans ce cas la couche native décrit le MÊME
+        # contenu que l'OCR, juste déformé différemment ("MOTQllë" vs
+        # "Marque"), et une comparaison exacte les aurait à tort considérées
+        # comme absentes de l'OCR, réinjectant du bruit déjà écarté à dessein.
+        # On utilise donc une couverture par PLUS LONGS SEGMENTS COMMUNS de
+        # caractères (tolère la déformation OCR) : une ligne n'est ajoutée
+        # comme résidu que si une faible part de ses caractères se retrouve
+        # dans l'OCR (seuil validé à 0.15 sur cas réels : 3 lignes de bruit
+        # vide laissées passer sur 114 lignes d'une couche copieur mal
+        # OCRisée, 0 contenu substantiel).
+        texte_natif = _extract_native_text_only(pdf_path)
+        if texte_natif:
+            ocr_norm = _normalise_pour_comparaison(text)
+            residu = "\n".join(
+                ligne for ligne in texte_natif.split("\n")
+                if ligne.strip() and len(_normalise_pour_comparaison(ligne)) >= 6
+                and _couverture_floue(ligne, ocr_norm) < 0.15
+            )
+            if residu.strip():
+                text += ("\n\n[TEXTE NUMÉRIQUE SUPERPOSÉ AU SCAN -- objet texte réel du PDF, "
+                         "possiblement un ajout/une correction tapée après coup, non capturé par "
+                         "l'OCR de l'image (souvent en trop petite police) -- fait foi comme les "
+                         "autres mentions du document] :\n" + residu)
+
         return {"text": text, "scanned": True, "path": str(pdf_path),
                 "pages_total": pages_total, **meta}
 
