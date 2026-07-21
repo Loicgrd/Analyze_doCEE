@@ -162,6 +162,18 @@ def afficher_resultats(data: dict, rules_path) -> None:
                 icon="🚨",
             )
 
+        _fiches_manquantes = data.get("fiches_manquantes") or []
+        if _fiches_manquantes:
+            st.error(
+                f"🚨 {len(_fiches_manquantes)} fiche(s) classifiée(s) mais SANS élément "
+                f"technique détaillé dans ce résultat (malgré une relance automatique) : "
+                f"**{', '.join(_fiches_manquantes)}**. Le tableau des éléments techniques "
+                f"ci-dessous ne couvre pas ces fiches — les mentions les concernant dans les "
+                f"anomalies/synthèse ne remplacent pas une vérification structurée. "
+                f"Relancer l'analyse est recommandé.",
+                icon="🚨",
+            )
+
         # =====================================================
         # 1. ÉLÉMENTS CLÉS DU DOSSIER (toujours visibles)
         # =====================================================
@@ -654,6 +666,17 @@ if uploaded:
                     st.stop()
                 st.write(f"→ {len(pdf_files)} PDF(s) trouvé(s)")
 
+                # `pdf_files` pointe dans `tmpdir`, qui sera SUPPRIMÉ du disque
+                # dès la sortie de ce bloc `with` -- mais l'annotation des PDF
+                # et la vérification visuelle des signatures n'interviennent
+                # qu'après (une fois l'audit terminé). Sans copie préalable des
+                # octets, ces étapes tombaient sur des chemins déjà supprimés
+                # ("no such file"). On garde donc les octets en mémoire ici,
+                # pour les réécrire dans un répertoire temporaire dédié juste
+                # avant l'annotation (créé sans context manager, donc non
+                # supprimé prématurément).
+                pdf_bytes_map = {Path(p).name: Path(p).read_bytes() for p in pdf_files}
+
                 status.update(label="📄 Lecture des documents…")
                 docs = {}
                 for pdf_path in pdf_files:
@@ -814,9 +837,21 @@ if uploaded:
                 "cout_eur": round(cost_eur, 4),
                 "temps_secondes": round(elapsed, 1),
                 "reponse_tronquee": result.get("reponse_tronquee", False),
+                "fiches_manquantes": result.get("fiches_manquantes", []),
                 "analyse": result.get("analyse", ""),
                 "audit": result.get("audit", {}),
             }
+
+            # Réécriture des PDF dans un répertoire dédié NON supprimé
+            # automatiquement (créé sans `with`, contrairement à `tmpdir` qui
+            # a déjà disparu à ce stade) -- c'est ce chemin, pas `pdf_files`
+            # (obsolète), qu'utilisent la vision signatures et l'annotation.
+            _persist_dir = Path(tempfile.mkdtemp(prefix="cee_annot_"))
+            pdf_files_persist = []
+            for name, data_bytes in pdf_bytes_map.items():
+                p = _persist_dir / name
+                p.write_bytes(data_bytes)
+                pdf_files_persist.append(p)
 
             # --- Passe VISION signatures/tampons sur le(s) document(s)
             # d'engagement : comble la limite structurelle de l'extraction
@@ -827,7 +862,7 @@ if uploaded:
                 from utils.vision_signatures import (check_signatures,
                                                       selectionner_docs_engagement)
                 _docs_eng = selectionner_docs_engagement(
-                    pdf_files, result.get("audit", {}) or {})
+                    pdf_files_persist, result.get("audit", {}) or {})
                 if _docs_eng:
                     with st.status("🖋️ Vérification visuelle des signatures/"
                                     "tampons (vision)…", expanded=False):
@@ -846,7 +881,7 @@ if uploaded:
                                 "de l'audit)…", expanded=False):
                     from utils.annotator import annotate_dossier
                     st.session_state["pdfs_annotes"] = annotate_dossier(
-                        pdf_files, result.get("audit", {}) or {})
+                        pdf_files_persist, result.get("audit", {}) or {})
             except Exception as _e:
                 st.session_state["pdfs_annotes"] = None
                 st.warning(f"Annotation des PDF impossible : {_e}", icon="⚠️")
