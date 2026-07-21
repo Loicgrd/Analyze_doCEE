@@ -179,8 +179,19 @@ def extract_text_from_pdf(pdf_path: Path, max_chars: int = 15000) -> str:
         return f"[Erreur extraction texte: {e}]"
 
 
-def _ocr_single_page(pdf_path: Path, page: int) -> str:
-    """OCR d'une seule page via pdftoppm + pytesseract."""
+def _ocr_single_page(pdf_path: Path, page: int, dpi: int = 300) -> str:
+    """
+    OCR d'une seule page via pdftoppm + pytesseract.
+
+    dpi=300 (au lieu de 200 historiquement) : les tableaux de chiffrage denses
+    (quantités, dimensions, prix unitaires en colonnes serrées) perdent des
+    valeurs à 200dpi -- cas réel observé (T233337) où la quantité et les
+    dimensions d'un poste de menuiseries ("24 U", "Dimensions : 3800x2200")
+    étaient absentes à 200dpi mais lisibles à 300dpi sans aucun autre
+    changement. Le surcoût est purement local (temps de traitement, pas de
+    tokens Claude) -- cohérent avec le principe déjà appliqué ailleurs dans
+    l'app (préférer la fiabilité au token près qui coûte quasi rien).
+    """
     try:
         import pytesseract
         from PIL import Image
@@ -191,7 +202,7 @@ def _ocr_single_page(pdf_path: Path, page: int) -> str:
         prefix = os.path.join(tmpdir, "page")
         subprocess.run(
             [
-                "pdftoppm", "-jpeg", "-r", "200",
+                "pdftoppm", "-jpeg", "-r", str(dpi),
                 "-f", str(page), "-l", str(page),
                 str(pdf_path), prefix,
             ],
@@ -244,6 +255,7 @@ def ocr_pdf_smart_meta(
     pdf_path: Path,
     max_pages_ocr: int = 6,
     max_chars: int = 8000,
+    dpi: int = 300,
 ) -> tuple:
     """
     Comme ocr_pdf_smart(), mais retourne aussi les MÉTADONNÉES DE COUVERTURE :
@@ -274,7 +286,7 @@ def ocr_pdf_smart_meta(
 
     parts = []
     for p in pages_to_ocr:
-        text = _ocr_single_page(pdf_path, p)
+        text = _ocr_single_page(pdf_path, p, dpi=dpi)
         if text:
             parts.append(f"[page {p}/{total_pages}]\n{text}")
 
@@ -370,16 +382,20 @@ def extract_document(pdf_path: Path, max_chars_text: int = 60000,
     if is_scanned_pdf(pdf_path):
         # Exception ciblée : une PREUVE DE RÉALISATION scannée (facture, DGD,
         # décompte...) porte les éléments techniques, souvent dans des annexes
-        # en pages intermédiaires. On élargit son OCR (toutes pages jusqu'à un
-        # plafond plus haut) plutôt que le schéma générique 3 début + 3 fin —
-        # le surcoût est du temps de traitement local (~3s/page), pas des
-        # tokens, et il évite des verdicts INCOMPLET 'hors extrait' évitables.
+        # en pages intermédiaires ET dans des tableaux de chiffrage denses
+        # (quantités/dimensions serrées entre plusieurs colonnes de prix,
+        # cas réel T233337). On élargit son OCR (toutes pages jusqu'à un
+        # plafond plus haut, résolution plus fine) plutôt que le schéma
+        # générique 3 début + 3 fin à 300dpi — le surcoût est du temps de
+        # traitement local (~4-5s/page à cette résolution), pas des tokens.
         _preuve_kw = ("facture", "dgd", "decompte", "décompte", "situation", "solde")
+        ocr_dpi = 300
         if any(kw in pdf_path.name.lower() for kw in _preuve_kw):
             max_pages_ocr = max(max_pages_ocr, 14)
             max_chars_ocr = max(max_chars_ocr, 30000)
+            ocr_dpi = 350
         text, meta = ocr_pdf_smart_meta(pdf_path, max_pages_ocr=max_pages_ocr,
-                                        max_chars=max_chars_ocr)
+                                        max_chars=max_chars_ocr, dpi=ocr_dpi)
 
         # Compléter avec la couche texte NATIVE résiduelle, si elle existe.
         # Cas réel (T233337) : un décompte scanné porte un AJOUT NUMÉRIQUE
