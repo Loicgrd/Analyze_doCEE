@@ -316,10 +316,19 @@ class RuleLoader:
 
         Returns:
             {"requise": bool|None, "texte": str|None}
+            - requise=True : la cellule contient une exigence explicite.
+            - requise=False : aucune exigence dans la cellule -- soit
+              explicitement "non obligatoire", soit cellule vide. Dans
+              l'immense majorité des cas (constaté sur ce référentiel : 55
+              versions BAR/132), une cellule vide signifie authentiquement
+              "pas de RGE requise", donc c'est le défaut retenu ici. Seule
+              exception connue à ce jour : BAR-EN-102 A39.2/A65.4, où la
+              cellule était restée vide après une version antérieure qui
+              disait explicitement "Non obligatoire" -- corrigé directement
+              dans le référentiel (voir Fiche_BAR.xlsx) plutôt que dans ce
+              code, pour ne pas générer une alerte "à vérifier" sur les 54
+              autres fiches où le vide est légitime.
             - requise=None si la fiche/version est introuvable dans le xlsx.
-            - Le texte peut contenir des exigences dépendant de sous-périodes
-              d'engagement ('Trx engagés à partir du 01/01/2021 : ...') — il
-              est retourné brut pour affichage.
         """
         xlsx_name = FICHE_XLSX.get(secteur)
         if not (xlsx_name and (self.rules_dir / xlsx_name).exists()):
@@ -556,7 +565,11 @@ class RuleLoader:
             # RGE non requise : quand la colonne QUALIFICATION est vide pour cette
             # version, le dire EXPLICITEMENT à Claude — sinon les règles générales
             # de regles_rge.md le pousseraient à exiger un certificat RGE à tort
-            # (55 versions sur 132 du référentiel BAR ne l'exigent pas).
+            # (55 versions sur 132 du référentiel BAR ne l'exigent pas). Un trou de
+            # saisie ponctuel (ex: BAR-EN-102 A39.2/A65.4) se corrige directement
+            # dans Fiche_BAR.xlsx, pas ici -- généraliser la prudence à toutes les
+            # fiches créerait une fausse alerte sur les 54 autres versions où le
+            # vide est légitime.
             if not qualification_presente:
                 lines.append("**Qualification du professionnel requise** :\n"
                              "▪ AUCUNE qualification RGE n'est exigée pour cette fiche/version. "

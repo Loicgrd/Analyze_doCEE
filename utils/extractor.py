@@ -25,19 +25,55 @@ def extract_zip(zip_path: Path, dest_dir: str) -> List[Path]:
 
 def is_scanned_pdf(pdf_path: Path) -> bool:
     """
-    Détecte si un PDF est scanné (pas de couche texte extractible).
-    Utilise pdffonts : si aucune police listée → scanné.
+    Détecte si un PDF doit être traité comme SCANNÉ (préférer une OCR fraîche
+    à la couche texte native). Deux signaux, combinés :
+
+    1. pdffonts : aucune police listée -> scanné à coup sûr (comportement
+       historique).
+    2. Page dominée par une image plein format (couvre la quasi-totalité de
+       la page) : c'est le signe d'un scan/photocopie, MÊME si une police est
+       listée. De nombreux copieurs/multifonctions embarquent leur propre
+       couche OCR invisible (souvent une police générique non-embarquée type
+       Helvetica/Arial) par-dessus l'image scannée -- cette couche est
+       généralement d'une qualité BIEN INFÉRIEURE à un passage Tesseract
+       frais à 200dpi (ex. observé : "Çlse en place d'un doublage )solanl
+       sur mui(s)" contre "Mise en place d'un doublage Isolant sur mur(s)"
+       pour Tesseract sur la même page). Sans ce second signal, ces PDF
+       étaient classés "natifs" et leur mauvaise couche texte utilisée telle
+       quelle -- d'où des citations et une extraction très dégradées malgré
+       un pdffonts non vide.
     """
     try:
         result = subprocess.run(
             ["pdffonts", str(pdf_path)],
-            capture_output=True,
-            text=True,
-            timeout=10,
+            capture_output=True, text=True, timeout=10,
         )
         lines = result.stdout.strip().split("\n")
         font_lines = [l for l in lines[2:] if l.strip()]
-        return len(font_lines) == 0
+        if len(font_lines) == 0:
+            return True
+    except Exception:
+        return False
+
+    return _page_dominee_par_image(pdf_path)
+
+
+def _page_dominee_par_image(pdf_path: Path, seuil_couverture: float = 0.85) -> bool:
+    """Vrai si la première page contient une image couvrant au moins
+    `seuil_couverture` de la surface de la page (signature d'un scan)."""
+    try:
+        import fitz
+        doc = fitz.open(str(pdf_path))
+        if doc.page_count == 0:
+            return False
+        page = doc[0]
+        page_area = page.rect.width * page.rect.height
+        couverte = 0.0
+        for img in page.get_images(full=True):
+            for rect in page.get_image_rects(img[0]):
+                couverte += rect.width * rect.height
+        doc.close()
+        return page_area > 0 and (couverte / page_area) >= seuil_couverture
     except Exception:
         return False
 

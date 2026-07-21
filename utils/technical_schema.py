@@ -102,6 +102,15 @@ MAPPING: List[Tuple[str, str]] = [
 FIELD_DESCRIPTIONS: Dict[str, str] = {
     "marque_reference": "Marque et référence du produit/équipement (valeur combinée)",
     "marque": "Marque du produit/équipement",
+    "marque__caisson": "Marque du caisson de ventilation (VMC)",
+    "marque__bouches_extraction": "Marque des bouches d'extraction (VMC)",
+    "marque__entree_air": "Marque des entrées d'air (VMC)",
+    "reference__caisson": "Référence commerciale exacte du caisson de ventilation (VMC), hors N° ACERMI/certification",
+    "reference__bouches_extraction": "Référence commerciale exacte des bouches d'extraction (VMC), hors N° ACERMI/certification",
+    "reference__entree_air": "Référence commerciale exacte des entrées d'air (VMC), hors N° ACERMI/certification",
+    "type_ventilation": ("Type de VMC si marque/référence non applicables : hygroréglable A, "
+                          "hygroréglable B, ou basse pression (alternative admise à la place de "
+                          "marque+référence par composant, selon la formulation de la fiche)"),
     "reference": ("Référence commerciale exacte du produit/équipement (nom de gamme/modèle). "
                    "NE JAMAIS y inclure le numéro ACERMI ni aucun numéro de certification — "
                    "ils vont dans le champ distinct `certification_acermi`"),
@@ -164,6 +173,34 @@ _MARQUE_REF_CONJ = re.compile(r"marques?\s*(?:et|,)\s*r[ée]f[ée]rences?")
 # "Marque et références de ces éléments OU le type hygroréglable...") — la
 # scinder casserait la sémantique "l'un des deux suffit".
 _DISJONCTION = re.compile(r"\bou\b")
+
+# Cas spécial VMC (BAR-TH-127 et fiches proches) : la ligne "Marque et
+# références de ces éléments OU le type (...)" désigne EN RÉALITÉ trois
+# composants distincts (caisson, bouches d'extraction, entrées d'air) dont
+# les comptes sont listés séparément juste avant dans le référentiel. Une
+# scission générique ne peut pas le deviner (la ligne elle-même ne nomme pas
+# les composants), donc on la détecte par signature : "marque et référence(s)
+# de ces éléments" + présence de "caisson" ET "bouche" ET "entrée" quelque
+# part dans le bloc de mentions. Sans ce cas spécial, la valeur "marque +
+# référence" des 3 composants finit compressée dans un seul champ générique
+# `marque_reference` -- impossible de savoir lequel des 3 composants manque.
+_VMC_ELEMENTS_CONJ = re.compile(r"marques?\s*et\s*r[ée]f[ée]rences?\s+de\s+ces\s+[ée]l[ée]ments")
+_VMC_COMPOSANTS = [
+    ("caisson", "caisson"),
+    ("bouche", "bouches_extraction"),
+    ("entr[ée]e", "entree_air"),
+]
+
+
+def _norm_texte_complet(bloc: str) -> str:
+    """Normalisation légère (minuscule + accents conservés pour les classes
+    de caractères [ée] du pattern) pour la détection de contexte VMC sur
+    l'ensemble du bloc de mentions, pas ligne par ligne."""
+    return bloc.lower()
+
+
+def _est_contexte_vmc(bloc_complet_normalise: str) -> bool:
+    return all(re.search(pat, bloc_complet_normalise) for pat, _ in _VMC_COMPOSANTS)
 
 
 def match_fields_multi(line: str) -> List[str]:
@@ -360,10 +397,26 @@ def build_fields_checklist_text(mentions_obligatoires: str, severite: str = "obl
     by_field: Dict[str, List[str]] = {}
     unmatched = []
     split_marque_ref = False
+    split_vmc = False
+    bloc_norm = _norm_texte_complet(mentions_obligatoires)
+    contexte_vmc = _est_contexte_vmc(bloc_norm)
+
     for line in mentions_obligatoires.split("\n"):
         line = line.strip().lstrip("▪").strip()
         if not line or len(line) < 3:
             continue
+
+        if contexte_vmc and _VMC_ELEMENTS_CONJ.search(line.lower()):
+            # Cas spécial VMC : 1 ligne -> 6 champs (marque+reference des 3
+            # composants). La ligne mentionne aussi une alternative "type"
+            # (hygroréglable A/B ou basse pression), conservée comme 7e champ.
+            split_vmc = True
+            for _, suffixe in _VMC_COMPOSANTS:
+                by_field.setdefault(f"marque__{suffixe}", []).append(line)
+                by_field.setdefault(f"reference__{suffixe}", []).append(line)
+            by_field.setdefault("type_ventilation", []).append(line)
+            continue
+
         fields = match_fields_multi(line)
         if fields:
             if "marque" in fields and "reference" in fields:
@@ -430,6 +483,27 @@ def build_fields_checklist_text(mentions_obligatoires: str, severite: str = "obl
             "de CHACUN séparément — il est fréquent qu'un seul des deux figure sur la facture, "
             "et le vérificateur doit savoir précisément LEQUEL manque. Ne fusionne pas les "
             "deux dans un seul élément, et ne déduis jamais l'un de la présence de l'autre."
+        )
+
+    if split_vmc:
+        lines_out.append(
+            "\nNB : le système de ventilation comporte 3 composants distincts (caisson, "
+            "bouches d'extraction, entrées d'air) : `marque__caisson`/`reference__caisson`, "
+            "`marque__bouches_extraction`/`reference__bouches_extraction`, "
+            "`marque__entree_air`/`reference__entree_air` sont volontairement SCINDÉS -- "
+            "évalue chaque composant séparément (la facture liste souvent une marque/référence "
+            "différente par composant). La fiche accepte une ALTERNATIVE : si le document "
+            "précise seulement le type de VMC (hygroréglable A, hygroréglable B, ou basse "
+            "pression) sans marque/référence détaillée par composant, remplis `type_ventilation` "
+            "à la place -- dans ce cas les 6 champs marque/référence peuvent être absents sans "
+            "que ce soit une non-conformité (l'un OU l'autre suffit, pas les deux).\n"
+            "NB (surface habitable) : la condition d'éligibilité de cette fiche dépend de la "
+            "surface habitable UNIQUEMENT pour une installation INDIVIDUELLE (logement par "
+            "logement, seuil en WThC absolu) -- PAS pour une installation COLLECTIVE (seuil "
+            "en WThC/(m3/h), indépendant de la surface). Cherche donc `surface_habitable_m2` "
+            "et vérifie son seuil SEULEMENT si le document indique une pose individuelle ; si "
+            "l'installation est collective, ne demande pas ce champ et n'en fais pas une "
+            "anomalie d'absence."
         )
 
     return "\n".join(lines_out)
