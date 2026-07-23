@@ -241,25 +241,27 @@ AUDIT_TOOL_SCHEMA = {
             "anomalies": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": ("Anomalies signalées mais non bloquantes (ex: écart de numéro de "
-                                 "dossier ODICEE, mention VISA à corriger). NE PAS inclure la "
-                                 "mention BAR-TH-130 liée à la case 'bâtiment neuf' non cochée "
-                                 "(faux positif connu, à ignorer totalement, cf. règles fournies)."),
+                "description": ("UNIQUEMENT les constats factuels qui ne figurent dans AUCUN "
+                                 "contrôle des axes -- ne JAMAIS répéter ici un contrôle déjà en "
+                                 "échec dans 'axes' (la redondance gaspille des tokens et noie le "
+                                 "vérificateur : chaque constat vit à UN seul endroit). Pas de "
+                                 "notes positives ('conforme, pas d'alerte à ce titre') : une "
+                                 "anomalie signale un problème ou une incertitude, rien d'autre. "
+                                 "Formulation courte et factuelle (1-2 phrases max par anomalie). "
+                                 "NE PAS inclure la mention BAR-TH-130 liée à la case 'bâtiment "
+                                 "neuf' non cochée (faux positif connu, à ignorer totalement, cf. "
+                                 "règles fournies)."),
             },
             "statut_global": {
                 "type": "string",
                 "enum": _VERDICT_ENUM,
                 "description": "Un seul axe ou une seule fiche NON VALIDE => dossier NON VALIDE. Un élément manquant sans non-conformité => INCOMPLET.",
             },
-            "synthese_narrative": {
-                "type": "string",
-                "description": "Résumé libre de 4 à 8 phrases pour une lecture humaine rapide : fiche(s), verdict global, points bloquants principaux.",
-            },
         },
         "required": ["fiches", "axes", "documents_engagement", "documents_realisation",
                       "date_engagement_confirmee", "date_realisation",
                       "professionnel_realisation", "sous_traitant", "adresse_travaux",
-                      "statut_global", "synthese_narrative"],
+                      "statut_global"],
     },
 }
 

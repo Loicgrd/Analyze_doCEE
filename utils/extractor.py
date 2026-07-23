@@ -360,7 +360,7 @@ def _couverture_floue(ligne: str, ocr_norm: str) -> float:
     return total / len(l)
 
 
-def extract_document(pdf_path: Path, max_chars_text: int = 60000,
+def extract_document(pdf_path: Path, max_chars_text: int = 200000,
                      max_pages_ocr: int = 6, max_chars_ocr: int = 8000) -> dict:
     """
     Point d'entrée unique d'extraction d'un PDF (texte natif OU scanné+OCR),
@@ -369,26 +369,38 @@ def extract_document(pdf_path: Path, max_chars_text: int = 60000,
     pour que le prompt d'audit connaisse la couverture réelle de chaque
     document (voir claude_client._build_docs_section).
 
-    max_chars_text (60 000 ≈ 17k tokens) est un simple garde-fou contre un
-    PDF natif aberrant : pour les éléments techniques, la préservation des
-    annexes de facture prime largement sur l'économie de tokens (~3 €/million
-    de tokens input). C'est le budget GLOBAL du dossier, appliqué dans
-    claude_client._build_docs_section, qui arbitre en cas de dossier
-    réellement volumineux — en priorisant les preuves de réalisation.
+    max_chars_text (200 000 ≈ 55k tokens) est un pur garde-fou contre un PDF
+    natif pathologique, PAS la contrainte réelle : c'est le budget GLOBAL du
+    dossier, appliqué dans claude_client._build_docs_section (120k caractères
+    tous documents confondus, en priorisant les preuves de réalisation), qui
+    doit arbitrer en cas de dossier réellement volumineux. Historiquement ce
+    plafond était à 60 000 et agissait, lui, comme la contrainte RÉELLE sur
+    tout document natif dépassant ce seuil -- même quand le dossier complet
+    tenait largement sous les 120k du budget global (cas réel observé :
+    dossier à 72k caractères au total, facture seule à 72k tronquée à 60k
+    alors que 48k de marge dormaient inutilisés ailleurs dans le budget
+    global). Le budget global ne peut pas "récupérer" du texte déjà coupé en
+    amont -- ce plafond doit donc rester nettement au-dessus de ce que le
+    budget global laisserait jamais passer pour un seul document.
     """
     pdf_path = Path(pdf_path)
     pages_total = get_page_count(pdf_path)
 
     if is_scanned_pdf(pdf_path):
         # Exception ciblée : une PREUVE DE RÉALISATION scannée (facture, DGD,
-        # décompte...) porte les éléments techniques, souvent dans des annexes
-        # en pages intermédiaires ET dans des tableaux de chiffrage denses
-        # (quantités/dimensions serrées entre plusieurs colonnes de prix,
-        # cas réel T233337). On élargit son OCR (toutes pages jusqu'à un
-        # plafond plus haut, résolution plus fine) plutôt que le schéma
-        # générique 3 début + 3 fin à 300dpi — le surcoût est du temps de
-        # traitement local (~4-5s/page à cette résolution), pas des tokens.
-        _preuve_kw = ("facture", "dgd", "decompte", "décompte", "situation", "solde")
+        # décompte...) OU un document de SOUS-TRAITANCE (DC4...) porte les
+        # éléments techniques ou l'identification du sous-traitant, souvent
+        # dans des annexes en pages intermédiaires ET dans des tableaux de
+        # chiffrage denses (quantités/dimensions serrées entre plusieurs
+        # colonnes de prix, cas réel T233337). On élargit son OCR (toutes
+        # pages jusqu'à un plafond plus haut, résolution plus fine) plutôt
+        # que le schéma générique 3 début + 3 fin à 300dpi — le surcoût est
+        # du temps de traitement local (~4-5s/page à cette résolution), pas
+        # des tokens. Cas réel (T186090) : DC4 de 10 pages limitée à 6 (1-3 +
+        # 8-10), la section identifiant précisément la nature des travaux
+        # sous-traités tombait dans les 4 pages intermédiaires non lues.
+        _preuve_kw = ("facture", "dgd", "decompte", "décompte", "situation", "solde",
+                      "dc4", "sous-traitance", "sous_traitance", "soustraitance")
         ocr_dpi = 300
         if any(kw in pdf_path.name.lower() for kw in _preuve_kw):
             max_pages_ocr = max(max_pages_ocr, 14)
