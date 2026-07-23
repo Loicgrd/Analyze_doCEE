@@ -162,7 +162,7 @@ def classify_dossier_ia(
     model: str = "claude-sonnet-5",  # tarif de lancement 2$/10$ par MTok jusqu au 31/08/2026, puis 3$/15$ (= tarif Sonnet 4.6)
     correspondance_table: str = "",
     max_chars_per_doc: int = 6000,  # marge suffisante pour préserver 2-3 fiches via smart_truncate
-    max_chars_facture: int = 12000,  # budget élargi : c'est le document le plus fiable/descriptif
+    max_chars_facture: int = 20000,  # budget élargi : c'est le document le plus fiable/descriptif
     regex_hint: list = None,
 ) -> Dict:
     """
@@ -253,7 +253,8 @@ def classify_dossier_ia(
         response = client.messages.create(
             model=model,
             max_tokens=800,
-            system=system_prompt,
+            system=[{"type": "text", "text": system_prompt,
+                      "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user_prompt}],
             tools=[CLASSIFY_TOOL_SCHEMA],
             tool_choice={"type": "tool", "name": "classifier_dossier_cee"},

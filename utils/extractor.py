@@ -117,18 +117,39 @@ def smart_truncate(text: str, max_chars: int = 15000) -> str:
 
     fiche_positions = [m.start() for m in _FICHE_SECTION_PATTERN.finditer(text)]
 
-    # Un seul code fiche (ou aucun) trouvé -> troncature simple tête+queue,
-    # comportement historique, suffisant pour un document mono-fiche.
-    if len(fiche_positions) <= 1:
+    # Cas réel (T186090) : une facture "normale" n'imprime presque jamais de
+    # code fiche explicite (cf. docstring de classify_dossier_ia), donc
+    # `fiche_positions` est vide même quand PLUSIEURS types de travaux
+    # distincts sont facturés (ex: "1.3 Travaux isolation thermique par
+    # l'extérieur" ET "1.4 Travaux isolation thermique par l'intérieur" —
+    # deux fiches différentes, EN-102 et EN-103). Sans second signal, la
+    # troncature tête+queue a silencieusement effacé le poste 1.4 (positions
+    # 7931-56455 sur un document de 72082 caractères, hors des 6000 premiers
+    # ET des 6000 derniers caractères conservés à ce budget). On détecte donc
+    # aussi les en-têtes de SOUS-SECTION NUMÉROTÉE ("1.3 Travaux ...", "4.2
+    # Fourniture ...") -- convention très répandue dans les devis/factures
+    # (Sage et autres), retrouvée telle quelle sur un second dossier
+    # (T233337 : "4.1 BLOCS BAIES" / "4.2 Fourniture et pose"). Un simple
+    # numéro de ligne de tableau ("1.865,00") ne peut pas matcher : il faut
+    # un nombre suivi d'espace(s) puis d'une majuscule en DÉBUT DE LIGNE.
+    section_positions = [
+        m.start() for m in _re.finditer(r"^\s*\d{1,2}\.\d{1,2}\s+[A-ZÀ-Ÿ]", text, _re.MULTILINE)
+    ]
+    toutes_positions = sorted(set(fiche_positions) | set(section_positions))
+
+    # Un seul repère (ou aucun) trouvé -> troncature simple tête+queue,
+    # comportement historique, suffisant pour un document à poste unique.
+    if len(toutes_positions) <= 1:
         half = max_chars // 2
         return text[:half] + "\n\n[...]\n\n" + text[-half:]
 
-    # Plusieurs codes fiche détectés, potentiellement espacés dans le
-    # document (AH multi-fiches) -> on garde une fenêtre de contexte
-    # autour de CHAQUE occurrence, plutôt que de risquer d'en effacer une.
+    # Plusieurs repères détectés, potentiellement espacés dans le document
+    # (AH multi-fiches, ou facture multi-postes) -> on garde une fenêtre de
+    # contexte autour de CHAQUE occurrence, plutôt que de risquer d'en
+    # effacer une.
     window = 1200  # caractères de contexte avant/après chaque occurrence
     ranges = []
-    for pos in fiche_positions:
+    for pos in toutes_positions:
         start = max(0, pos - 200)
         end = min(len(text), pos + window)
         ranges.append((start, end))
