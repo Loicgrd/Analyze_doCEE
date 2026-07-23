@@ -223,18 +223,19 @@ def afficher_resultats(data: dict, rules_path) -> None:
             if fiche_obj.get("version_applicable"):
                 st.caption(f"**{fiche_obj.get('code', '?')}** — {fiche_obj['version_applicable']}")
 
-        # --- Identité & lieu (preuve de réalisation) ---
+        # --- Identité & lieu (preuve de réalisation) — compact ---
         pro = audit.get("professionnel_realisation")
         adresse = audit.get("adresse_travaux")
         sous_t = audit.get("sous_traitant")
-        st.markdown(
-            f"**🏗️ Professionnel (réalisation) :** {pro or '❌ Non identifié'}  \n"
-            f"**📍 Adresse des travaux :** {adresse or '❌ Introuvable'}"
-        )
+        lignes_id = [
+            f"**🏗️ Professionnel :** {pro or '❌ Non identifié'}",
+            f"**📍 Adresse :** {adresse or '❌ Introuvable'}",
+        ]
         if sous_t:
-            st.warning(f"**Sous-traitance détectée :** {sous_t} — en cas de "
-                       f"sous-traitance, c'est le sous-traitant qui doit porter la "
-                       f"qualification RGE quand la fiche l'exige.", icon="🔩")
+            lignes_id.append(f"**🔩 Sous-traitant :** {sous_t} _(doit porter la RGE si exigée)_")
+        if audit.get("montant_ht"):
+            lignes_id.append(f"**💶 Montant HT :** {audit['montant_ht']}")
+        st.markdown("  \n".join(lignes_id))
 
         # --- Constat visuel signatures/tampons (passe vision dédiée) ---
         _sig = data.get("verification_signatures")
@@ -243,34 +244,25 @@ def afficher_resultats(data: dict, rules_path) -> None:
                 st.caption(f"🖋️ Vérification visuelle des signatures indisponible : "
                            f"{_sig['erreur']}")
             else:
+                lignes_sig = []
                 for pg in _sig.get("pages", []):
                     s_ok = pg.get("signature_manuscrite_presente")
                     t_ok = pg.get("tampon_present")
                     if not s_ok and not t_ok:
-                        icone, constat = "❌", "aucune signature manuscrite ni tampon visibles"
+                        icone, constat = "❌", "ni signature ni tampon"
                     elif s_ok and t_ok:
-                        icone, constat = "✅", "signature manuscrite + tampon visibles"
+                        icone, constat = "✅", "signature + tampon"
                     elif s_ok:
-                        icone, constat = "🟡", "signature manuscrite visible, pas de tampon"
+                        icone, constat = "🟡", "signature seule"
                     else:
-                        icone, constat = "🟡", "tampon visible, pas de signature manuscrite"
-                    detail = []
-                    if pg.get("bloc"):
-                        detail.append(f"bloc « {pg['bloc']} »")
-                    if pg.get("date_manuscrite_ou_tamponnee"):
-                        detail.append(f"datée du {pg['date_manuscrite_ou_tamponnee']}")
-                    if pg.get("commentaire"):
-                        detail.append(pg["commentaire"])
-                    st.markdown(
-                        f"**🖋️ Signature/tampon (vision)** — "
-                        f"{pg.get('document', '?')} p.{pg.get('page', '?')} : "
-                        f"{icone} {constat}"
-                        + (f" ({' · '.join(detail)})" if detail else "")
+                        icone, constat = "🟡", "tampon seul"
+                    date_s = pg.get("date_manuscrite_ou_tamponnee")
+                    lignes_sig.append(
+                        f"{icone} {pg.get('document', '?')} p.{pg.get('page', '?')} : {constat}"
+                        + (f", daté {date_s}" if date_s else "")
                     )
-                st.caption("Constat par vision (lecture d'image), indépendant de "
-                           "l'extraction de texte — la date manuscrite/tamponnée "
-                           "peut servir de date d'engagement (règle : date du "
-                           "document ou date de signature du MOA).")
+                if lignes_sig:
+                    st.markdown("**🖋️ Signatures (vision) :** " + " · ".join(lignes_sig))
 
         # --- RGE : affichée seulement si la fiche/version l'exige ---
         # (colonne 'QUALIFICATION DU PROFESSIONNEL' du récap xlsx : 55
@@ -287,23 +279,15 @@ def afficher_resultats(data: dict, rules_path) -> None:
                 qual = {"requise": None, "texte": None}
             if qual["requise"] is True:
                 texte_court = (qual["texte"] or "").replace("\n", " · ")
-                if len(texte_court) > 140:
-                    texte_court = texte_court[:140] + "…"
-                st.markdown(f"**🎓 RGE requise** ({code}) : {texte_court}  \n"
-                            f"→ Verdict axe RGE : {rge_icon} **{rge_verdict}**")
+                if len(texte_court) > 110:
+                    texte_court = texte_court[:110] + "…"
+                st.markdown(f"**🎓 RGE requise** ({code}) — {rge_icon} **{rge_verdict}** · {texte_court}")
             elif qual["requise"] is False:
-                st.markdown(f"**🎓 RGE** ({code}) : _non requise pour cette "
-                            f"fiche/version à la date d'engagement_")
+                st.caption(f"🎓 RGE ({code}) : non requise pour cette version")
             else:
                 st.caption(f"🎓 RGE ({code}) : exigence non déterminable depuis le "
                            f"référentiel (fiche absente du récap xlsx) — voir l'axe "
                            f"RGE dans le récapitulatif.")
-
-        # Montant HT : volontairement discret — sert au lien fort
-        # engagement ↔ réalisation, pas un élément d'éligibilité.
-        if audit.get("montant_ht"):
-            st.caption(f"Montant HT (preuve de réalisation, lien fort "
-                       f"engagement ↔ réalisation) : {audit['montant_ht']}")
 
         if incoherence_dates:
             st.error("🚨 La date de réalisation est ANTÉRIEURE à la date "
@@ -323,10 +307,8 @@ def afficher_resultats(data: dict, rules_path) -> None:
         docs_rea = data.get("audit", {}).get("documents_realisation") or []
         if docs_eng or docs_rea:
             st.caption(
-                f"**Documents d'engagement** (source exclusive de la date "
-                f"d'engagement) : {', '.join(docs_eng) or '❌ aucun identifié'} · "
-                f"**Preuves de réalisation** (source des éléments techniques) : "
-                f"{', '.join(docs_rea) or '❌ aucune identifiée'}"
+                f"📄 Engagement : {', '.join(docs_eng) or '❌ aucun'} · "
+                f"Réalisation : {', '.join(docs_rea) or '❌ aucune'}"
             )
             if not docs_eng:
                 st.warning("Aucun document d'engagement identifié dans le dossier — "
@@ -421,9 +403,29 @@ def afficher_resultats(data: dict, rules_path) -> None:
                     bloquants.append(f"**[Technique {code}]** citation de `{champ}` INTROUVABLE "
                                      f"dans les documents — risque d'hallucination, vérifier en priorité")
 
-        # c) Anomalies signalées par l'audit
+        # c) Anomalies signalées par l'audit — DÉDUPLIQUÉES contre les
+        # contrôles d'axes déjà en échec : le modèle est instruit de ne plus
+        # produire ces redites (schéma), mais ce filet d'affichage protège
+        # aussi les anciens JSON réimportés. Mesuré sur un dossier réel :
+        # 3 anomalies sur 8 recouvraient un contrôle KO à plus de 35%
+        # de mots communs — seuil retenu ici.
+        import re as _re
+
+        def _mots(s):
+            return set(_re.findall(r"[a-zà-ù0-9]{4,}", s.lower()))
+
+        _controles_ko_txt = []
+        for _axe in audit.get("axes", {}).values():
+            for _c in _axe.get("controles", []):
+                if not _c.get("verdict"):
+                    _controles_ko_txt.append(
+                        _mots((_c.get("item", "") + " " + (_c.get("details") or ""))))
         for a in audit.get("anomalies", []):
-            avertissements.append(f"**[Anomalie]** {a}")
+            _wa = _mots(a)
+            _redondante = any(
+                len(_wa & _wc) / max(1, len(_wa)) > 0.35 for _wc in _controles_ko_txt)
+            if not _redondante:
+                avertissements.append(f"**[Anomalie]** {a}")
 
         if not bloquants and not avertissements:
             st.success("Aucun point bloquant ni anomalie détecté sur ce dossier.", icon="✅")
@@ -437,9 +439,6 @@ def afficher_resultats(data: dict, rules_path) -> None:
         # 4. RÉCAP COMPLET (replié — vue épurée)
         # =====================================================
         st.subheader("📋 Récapitulatif complet des vérifications")
-        if audit.get("synthese_narrative"):
-            with st.expander("📝 Synthèse narrative", expanded=False):
-                st.markdown(audit["synthese_narrative"])
 
         axe_labels_full = {
             "logique_globale": "1. Logique globale",
@@ -868,6 +867,18 @@ if uploaded:
                                     "tampons (vision)…", expanded=False):
                         _sig = check_signatures(_docs_eng)
                     st.session_state["analyse_resultat"]["verification_signatures"] = _sig
+                    # Coût de cet appel séparé (vision) -- absent jusqu'ici du
+                    # coût total affiché, alors qu'il est systématiquement
+                    # facturé dès qu'un document d'engagement est identifié.
+                    _sig_tk = (_sig or {}).get("tokens_used")
+                    if _sig_tk:
+                        from utils.claude_client import PRICE_INPUT_USD_MTOK, PRICE_OUTPUT_USD_MTOK
+                        _sig_cost = (
+                            _sig_tk.get("input", 0) * PRICE_INPUT_USD_MTOK
+                            + _sig_tk.get("output", 0) * PRICE_OUTPUT_USD_MTOK
+                        ) / 1_000_000 * 0.92
+                        st.session_state["analyse_resultat"]["cout_eur"] = round(
+                            st.session_state["analyse_resultat"].get("cout_eur", 0.0) + _sig_cost, 4)
             except Exception as _e:
                 st.session_state["analyse_resultat"]["verification_signatures"] = {
                     "erreur": str(_e)}
